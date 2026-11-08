@@ -46,6 +46,20 @@
             </LinearLayout>
 
             <View style="@style/Divider" />
+
+            <LinearLayout style="@style/Row">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView style="@style/RowTitle" android:text="3 · Earbuds pop-ups" />
+                    <TextView android:id="@+id/statusBt" style="@style/RowSub" />
+                </LinearLayout>
+                <Button android:id="@+id/btnBt" style="@style/PillButton" android:text="Allow" />
+            </LinearLayout>
+
+            <View style="@style/Divider" />
             <TextView style="@style/Hint" android:text="@string/restricted_hint" />
         </LinearLayout>
 
@@ -94,6 +108,14 @@
             <Switch android:id="@+id/swMedia" style="@style/SwitchRow" android:text="Now playing &amp; controls" />
             <View style="@style/Divider" />
             <Switch android:id="@+id/swCharging" style="@style/SwitchRow" android:text="Charging indicator" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swStatus" style="@style/SwitchRow" android:text="Status pop-ups: earbuds, silent mode, Do Not Disturb" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swCopy" style="@style/SwitchRow" android:text="Copy suggestions: open copied links, call copied numbers" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swDrop" style="@style/SwitchRow" android:text="Drag text or a link to the top to share it" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swGlow" style="@style/SwitchRow" android:text="Glow around the island" />
             <View style="@style/Divider" />
             <Switch android:id="@+id/swLandscape" style="@style/SwitchRow" android:text="Hide in landscape" />
         </LinearLayout>

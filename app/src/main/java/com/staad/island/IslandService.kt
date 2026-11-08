@@ -1,17 +1,25 @@
 package com.staad.island
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityOptions
+import android.app.NotificationManager
 import android.app.PendingIntent
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothDevice
+import android.content.ClipboardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -19,6 +27,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -31,6 +40,7 @@ import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
 import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
 import android.view.WindowManager.LayoutParams.WRAP_CONTENT
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import com.staad.island.IslandView.Mode
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -39,7 +49,8 @@ import kotlin.math.roundToInt
  * Owns the overlay window and decides what the island shows.
  *
  * Priority (highest first):
- *   notification pop-out › charging › expanded player › compact "now playing" › idle pill
+ *   drop target › suggestion card (copied link…) › notification › status
+ *   (earbuds, silent…) › charging › expanded player › compact "now playing" › idle
  */
 class IslandService : AccessibilityService(),
     IslandBus.Listener,
@@ -65,8 +76,37 @@ class IslandService : AccessibilityService(),
     private var mediaExpanded = false
     private var receiverRegistered = false
 
+    private class Status(val icon: Int, val tint: Int, val title: String, val value: String, val valueColor: Int)
+    private var status: Status? = null
+    private var card: Card? = null
+    private var dropActive = false
+    private var dropHover = false
+    private val suggestions by lazy { Suggestions(this) { card = null; render() } }
+
+    // copy detection (see onAccessibilityEvent)
+    private var lastSelection: String? = null
+    private var lastSelectionAt = 0L
+    private var lastCopied: String? = null
+    private var lastCopiedAt = 0L
+    private val copyLabels by lazy {
+        setOf("copy", runCatching { Resources.getSystem().getString(android.R.string.copy) }.getOrDefault("Copy"))
+            .map { it.lowercase() }.toSet()
+    }
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        // Android only lets background apps read the clipboard in a few cases;
+        // when it does, this is the most reliable signal.
+        val text = runCatching {
+            getSystemService(ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull()
+        if (!text.isNullOrBlank()) onCopied(text)
+    }
+    private var btConnectedAt = 0L
+    private var btName: String? = null
+
     private val clearNotif = Runnable { notif = null; render() }
     private val clearCharge = Runnable { charge = null; render() }
+    private val clearStatus = Runnable { status = null; render() }
+    private val clearCard = Runnable { card = null; render() }
     private val collapseMedia = Runnable { mediaExpanded = false; render() }
     private val progressTick = object : Runnable {
         override fun run() {
@@ -86,6 +126,30 @@ class IslandService : AccessibilityService(),
             handler.removeCallbacks(clearCharge)
             handler.postDelayed(clearCharge, 3500)
             render()
+        }
+    }
+
+    /** Earbuds, silent / vibrate, Do Not Disturb. */
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!cfg.statusPopups || isInitialStickyBroadcast) return
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> onBluetooth(intent, connected = true)
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> onBluetooth(intent, connected = false)
+                ACTION_BT_BATTERY -> onBluetoothBattery(intent)
+                AudioManager.RINGER_MODE_CHANGED_ACTION -> when (intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, -1)) {
+                    AudioManager.RINGER_MODE_SILENT -> showStatus(Status(R.drawable.ic_bell_off, RED, "Silent", "On", RED))
+                    AudioManager.RINGER_MODE_VIBRATE -> showStatus(Status(R.drawable.ic_vibrate, ORANGE, "Vibrate", "On", ORANGE))
+                    AudioManager.RINGER_MODE_NORMAL -> showStatus(Status(R.drawable.ic_bell, WHITE, "Ring", "On", WHITE))
+                }
+                NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> {
+                    val on = getSystemService(NotificationManager::class.java)
+                        ?.currentInterruptionFilter?.let { it != NotificationManager.INTERRUPTION_FILTER_ALL } ?: return
+                    showStatus(
+                        Status(R.drawable.ic_moon, PURPLE, "Do Not Disturb", if (on) "On" else "Off", if (on) PURPLE else GREY)
+                    )
+                }
+            }
         }
     }
 
@@ -123,6 +187,7 @@ class IslandService : AccessibilityService(),
                 if (area == null || tp == null || dp == null) return@setOnTouchListener false
                 island?.forwardTouch(ev, (tp.x - dp.x).toFloat(), (tp.y - dp.y).toFloat()) ?: false
             }
+            setOnDragListener { _, e -> onDrag(e) }
         }
         val tlp = WindowManager.LayoutParams(
             1, 1,
@@ -154,13 +219,186 @@ class IslandService : AccessibilityService(),
         } else {
             registerReceiver(powerReceiver, filter)
         }
+        val statusFilter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(ACTION_BT_BATTERY)
+            addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
+            addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(statusReceiver, statusFilter)
+        }
         receiverRegistered = true
+        runCatching { getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
         Prefs.get(this).registerOnSharedPreferenceChangeListener(this)
         IslandBus.listener = this // replays current media state → render()
         render()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    /**
+     * Copy suggestions. Android doesn't let a background app read the
+     * clipboard, so notice copying instead:
+     *  1. remember the text you select, and when you tap "Copy", that's it;
+     *  2. Android 13+ shows a "copied" preview from System UI: read its text.
+     * Nothing is stored: the text only lives in memory long enough to show
+     * the card.
+     */
+    override fun onAccessibilityEvent(e: AccessibilityEvent?) {
+        e ?: return
+        if (!cfg.copySuggestions) return
+        when (e.eventType) {
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                val text = e.text?.firstOrNull()?.toString() ?: return
+                val a = minOf(e.fromIndex, e.toIndex)
+                val b = maxOf(e.fromIndex, e.toIndex)
+                if (a >= 0 && b > a && b <= text.length) {
+                    lastSelection = text.substring(a, b)
+                    lastSelectionAt = SystemClock.uptimeMillis()
+                }
+            }
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                val label = (e.text?.joinToString(" ") ?: "") + (e.contentDescription ?: "")
+                if (label.trim().lowercase() !in copyLabels) return
+                val sel = lastSelection
+                if (sel != null && SystemClock.uptimeMillis() - lastSelectionAt < 60_000) {
+                    onCopied(sel)
+                } else {
+                    // no selection seen: the System UI preview may still tell us
+                    handler.postDelayed({ readClipboardPreview() }, 250)
+                }
+            }
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
+                if (e.packageName == "com.android.systemui") readClipboardPreview()
+        }
+    }
+
+    private fun readClipboardPreview() {
+        val roots = runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList())
+        for (root in roots) {
+            if (root.packageName != "com.android.systemui") continue
+            val node: AccessibilityNodeInfo = root.findAccessibilityNodeInfosByViewId(
+                "com.android.systemui:id/text_preview"
+            ).firstOrNull() ?: continue
+            val text = node.text?.toString()
+            if (!text.isNullOrBlank()) onCopied(text)
+            return
+        }
+    }
+
+    private fun onCopied(text: String) {
+        val now = SystemClock.uptimeMillis()
+        if (text == lastCopied && now - lastCopiedAt < 4000) return // the same copy, seen twice
+        lastCopied = text
+        lastCopiedAt = now
+        val c = suggestions.forCopied(text) ?: return
+        showCard(c)
+    }
+
+    private fun showCard(c: Card) {
+        card = c
+        mediaExpanded = false
+        handler.removeCallbacks(clearCard)
+        handler.postDelayed(clearCard, 6500)
+        render()
+    }
+
+    private fun showStatus(st: Status) {
+        status = st
+        handler.removeCallbacks(clearStatus)
+        handler.postDelayed(clearStatus, 2400)
+        render()
+    }
+
+    // Earbuds, headphones, speakers, watches: not phones or computers
+    // (Notify Bridge keeps a link to the PC, and that's not news).
+    private fun onBluetooth(intent: Intent, connected: Boolean) {
+        if (!hasBluetoothPermission()) return
+        val device = deviceFrom(intent) ?: return
+        val major = runCatching { device.bluetoothClass?.majorDeviceClass }.getOrNull() ?: return
+        if (major != BluetoothClass.Device.Major.AUDIO_VIDEO && major != BluetoothClass.Device.Major.WEARABLE &&
+            major != BluetoothClass.Device.Major.PERIPHERAL
+        ) return
+        val name = runCatching { device.alias ?: device.name }.getOrNull() ?: "Bluetooth device"
+        val icon = if (major == BluetoothClass.Device.Major.AUDIO_VIDEO) R.drawable.ic_headphones else R.drawable.ic_bluetooth
+        if (connected) {
+            btConnectedAt = SystemClock.uptimeMillis()
+            btName = name
+            showStatus(Status(icon, BLUE, name, "Connected", BLUE))
+        } else {
+            showStatus(Status(icon, GREY, name, "Disconnected", GREY))
+        }
+    }
+
+    // The battery level usually arrives a moment after connecting: show it in the same pop-up.
+    private fun onBluetoothBattery(intent: Intent) {
+        val level = intent.getIntExtra(EXTRA_BT_BATTERY, -1)
+        if (level < 0 || SystemClock.uptimeMillis() - btConnectedAt > 8000) return
+        val name = btName ?: return
+        val color = if (level <= 20) RED else GREEN
+        showStatus(Status(R.drawable.ic_headphones, BLUE, name, "$level%", color))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun deviceFrom(intent: Intent): BluetoothDevice? =
+        if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        }
+
+    private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
+        checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    // ── Drag & drop ─────────────────────────────────────────────────────────
+    // Apps that allow dragging between apps (Chrome, Files, Photos in split
+    // screen…) can drop text, links and photos on the island to share them.
+
+    private fun onDrag(e: DragEvent): Boolean {
+        when (e.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                if (!cfg.dragDrop || island?.visibility != View.VISIBLE) return false
+                dropActive = true
+                dropHover = false
+                openDropZone()
+                render()
+                return true
+            }
+            DragEvent.ACTION_DRAG_ENTERED -> { dropHover = true; render() }
+            DragEvent.ACTION_DRAG_EXITED -> { dropHover = false; render() }
+            DragEvent.ACTION_DROP -> {
+                val c = suggestions.forDropped(e.clipData)
+                dropActive = false
+                dropHover = false
+                if (c != null) showCard(c) else render()
+                return c != null
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                if (dropActive) {
+                    dropActive = false
+                    dropHover = false
+                    render()
+                }
+            }
+        }
+        return true
+    }
+
+    /** While something is being dragged, the whole top of the screen is the drop zone. */
+    private fun openDropZone() {
+        val pad = touchPad ?: return
+        val tp = touchParams ?: return
+        val screen = screenSize()
+        tp.flags = tp.flags and FLAG_NOT_TOUCHABLE.inv()
+        tp.x = 0
+        tp.y = 0
+        tp.width = screen.x
+        tp.height = (150 * resources.displayMetrics.density).roundToInt()
+        runCatching { wm?.updateViewLayout(pad, tp) }
+    }
+
     override fun onInterrupt() = Unit
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -184,9 +422,11 @@ class IslandService : AccessibilityService(),
         handler.removeCallbacksAndMessages(null)
         if (receiverRegistered) {
             runCatching { unregisterReceiver(powerReceiver) }
+            runCatching { unregisterReceiver(statusReceiver) }
             receiverRegistered = false
         }
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(this)
+        runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
         island?.let { v -> runCatching { wm?.removeView(v) } }
         touchPad?.let { v -> runCatching { wm?.removeView(v) } }
         island = null
@@ -233,8 +473,13 @@ class IslandService : AccessibilityService(),
         if (m == null) mediaExpanded = false
         val n = notif
         val c = charge
+        val k = card
+        val st = status
         when {
+            dropActive -> v.showDropTarget(dropHover)
+            k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
             n != null -> v.showNotification(n.icon, n.title, n.text)
+            st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
             c != null -> v.showCharging(c.first, c.second)
             mediaExpanded && m != null -> v.showMedia(m)
             m != null && m.playing -> v.showCompactMedia(m)
@@ -257,6 +502,7 @@ class IslandService : AccessibilityService(),
     // The island settled somewhere (or is moving / hidden: null). Put the
     // touch window exactly over it, or make it let everything through.
     override fun onTouchArea(area: Rect?) {
+        if (dropActive) return // the drop zone owns the touch window until the drag ends
         val pad = touchPad ?: return
         val tp = touchParams ?: return
         val dp = params ?: return
@@ -366,6 +612,14 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         when (v.mode) {
             Mode.NOTIFICATION -> notif?.let { openNotification(it) }
+            // tapping the card (not a button) does the first suggestion
+            Mode.ACTIONS -> card?.actions?.firstOrNull()?.run?.invoke()
+            Mode.STATUS -> {
+                handler.removeCallbacks(clearStatus)
+                status = null
+                render()
+            }
+            Mode.DROP -> Unit
             Mode.CHARGING -> {
                 handler.removeCallbacks(clearCharge)
                 charge = null
@@ -398,6 +652,11 @@ class IslandService : AccessibilityService(),
         if (mediaExpanded) {
             handler.removeCallbacks(collapseMedia)
             mediaExpanded = false
+            changed = true
+        }
+        if (card != null && SystemClock.uptimeMillis() - lastCopiedAt > 700) {
+            handler.removeCallbacks(clearCard)
+            card = null
             changed = true
         }
         if (notif != null && SystemClock.uptimeMillis() - notifShownAt > 700) {
@@ -441,8 +700,12 @@ class IslandService : AccessibilityService(),
         handler.removeCallbacks(clearNotif)
         handler.removeCallbacks(clearCharge)
         handler.removeCallbacks(collapseMedia)
+        handler.removeCallbacks(clearStatus)
+        handler.removeCallbacks(clearCard)
         notif = null
         charge = null
+        status = null
+        card = null
         mediaExpanded = false
         render()
     }
@@ -466,5 +729,18 @@ class IslandService : AccessibilityService(),
             pi.send(this, 0, null, null, null, null, opts)
         } catch (_: PendingIntent.CanceledException) {
         }
+    }
+
+    private companion object {
+        // not in the public SDK, but sent by Android when a headset reports its battery
+        const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
+        const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
+        const val BLUE = 0xFF0A84FF.toInt()
+        const val GREEN = 0xFF30D158.toInt()
+        const val RED = 0xFFFF453A.toInt()
+        const val ORANGE = 0xFFFF9F0A.toInt()
+        const val PURPLE = 0xFF5E5CE6.toInt()
+        const val GREY = 0xFF8E8E93.toInt()
+        const val WHITE = 0xFFFFFFFF.toInt()
     }
 }

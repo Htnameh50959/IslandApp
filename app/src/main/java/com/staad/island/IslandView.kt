@@ -1,5 +1,7 @@
 package com.staad.island
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
@@ -8,11 +10,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.ShapeDrawable
 import android.graphics.drawable.shapes.OvalShape
@@ -24,9 +28,11 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.ViewOutlineProvider
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -37,23 +43,26 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
- * The island itself: a black pill that springs between sizes and swaps the
- * content inside it.
+ * The island: a black pill that springs between shapes, with the content
+ * living inside it and a soft coloured glow around it (OriginOS style).
  *
  * Motion is driven by real springs (width, height, corner radius, press
  * scale) stepped every frame, so a change that arrives mid-animation keeps
- * the current momentum instead of restarting — like iOS.
+ * the current momentum. Content is scaled to the pill's current size, so it
+ * grows out of the camera and shrinks back into it.
  *
- * The overlay window is only resized when the pill needs more room (at the
- * start of a grow) or when it has settled (to give touches back to the apps
- * underneath). Every frame in between only redraws: no layout passes.
+ * The island is drawn into one fixed window across the top of the screen
+ * that never moves or resizes (that's what keeps the motion smooth). Touches
+ * come from a separate small window over the settled island: see
+ * [forwardTouch] and [Callbacks.onTouchArea].
  *
- * Geometry: the window is horizontally centred on the anchor (the camera, or
+ * Geometry: the pill is horizontally centred on the anchor (the camera, or
  * the top-centre of the screen). Its top edge is where a compact pill's top
- * edge sits. Pills shorter than the compact height (the idle pill around the
- * camera) are vertically centred on the anchor instead.
+ * edge sits; pills shorter than that (the idle pill around the camera) are
+ * vertically centred on the anchor instead.
  */
 @SuppressLint("ViewConstructor", "ClickableViewAccessibility", "SetTextI18n")
 class IslandView(context: Context) : FrameLayout(context) {
@@ -67,10 +76,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onPlayPause()
         fun onNext()
         /** Where the settled island is (window coordinates), or null when it shouldn't take touches. */
-        fun onTouchArea(area: android.graphics.Rect?)
+        fun onTouchArea(area: Rect?)
     }
 
-    enum class Mode { IDLE, COMPACT_MEDIA, CHARGING, NOTIFICATION, MEDIA }
+    enum class Mode { IDLE, COMPACT_MEDIA, CHARGING, STATUS, NOTIFICATION, ACTIONS, DROP, MEDIA }
 
     /** Where the camera is, in pixels. holeW/holeH are 0 when there's no usable cutout. */
     data class Geometry(
@@ -81,6 +90,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         val anchorX: Int = 0,
         val screenW: Int = 0,
     )
+
+    /** A button on an action card: an app icon (kept in colour) or a white glyph. */
+    class Action(val label: String, val icon: Drawable?, val glyph: Int, val run: () -> Unit)
 
     var callbacks: Callbacks? = null
     var cfg: IslandConfig = IslandConfig.DEFAULT
@@ -98,7 +110,37 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun dp(v: Number): Int = (v.toFloat() * density).roundToInt()
 
     private val green = 0xFF30D158.toInt()
+    private val blue = 0xFF0A84FF.toInt()
     private val grey = 0xFF98989F.toInt()
+    private val chip = 0xFF2C2C2E.toInt()
+
+    // ── Drawing surfaces ────────────────────────────────────────────────────
+    private val rect = RectF()
+    private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowRect = RectF()
+
+    /** Soft light behind the pill, blurred (Android 12+). */
+    private val glowView = object : View(context) {
+        override fun onDraw(canvas: Canvas) {
+            val a = glowStrength()
+            if (a <= 0.01f) return
+            glowPaint.color = glowColor
+            glowPaint.alpha = (a * 150).roundToInt().coerceIn(0, 255)
+            val grow = dp(3).toFloat()
+            glowRect.set(rect.left - grow, rect.top - grow, rect.right + grow, rect.bottom + grow)
+            val r = min(cornerRadius() + grow, glowRect.height() / 2f)
+            canvas.drawRoundRect(glowRect, r, r, glowPaint)
+        }
+    }
+
+    /** The black pill. It clips the content to its rounded shape. */
+    private val pillView = object : FrameLayout(context) {
+        override fun onDraw(canvas: Canvas) {
+            val r = cornerRadius()
+            canvas.drawRoundRect(rect, r, r, pillPaint)
+        }
+    }
 
     // ── Compact layer (art ◀ camera ▶ bars / charging %) ────────────────────
     private val compactIcon = ImageView(context).apply {
@@ -114,6 +156,21 @@ class IslandView(context: Context) : FrameLayout(context) {
         addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         addView(compactBars, LinearLayout.LayoutParams(dp(20), dp(15)))
         addView(compactText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+    }
+
+    // ── Status layer (icon + name ◀ camera ▶ value) ─────────────────────────
+    private val statusIcon = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+    private val statusTitle = label(13.5f, Color.WHITE, bold = true)
+    private val statusGap = View(context)
+    private val statusValue = label(13.5f, Color.WHITE, bold = true).apply { gravity = Gravity.END }
+    private val statusLayer = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), 0, dp(16), 0)
+        addView(statusIcon, LinearLayout.LayoutParams(dp(20), dp(20)))
+        addView(statusTitle, LinearLayout.LayoutParams(0, WRAP_CONTENT).apply { marginStart = dp(8) })
+        addView(statusGap, LinearLayout.LayoutParams(0, 1))
+        addView(statusValue, LinearLayout.LayoutParams(0, WRAP_CONTENT))
     }
 
     // ── Notification layer ──────────────────────────────────────────────────
@@ -134,6 +191,52 @@ class IslandView(context: Context) : FrameLayout(context) {
             addView(notifTitle)
             addView(notifText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+    }
+
+    // ── Action card layer (copied link / number / email, dropped text) ──────
+    private val actionBadge = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+        val pad = dp(8)
+        setPadding(pad, pad, pad, pad)
+    }
+    private val actionKind = label(11.5f, grey, bold = true).apply { letterSpacing = 0.06f }
+    private val actionText = label(15f, Color.WHITE, bold = true)
+    private val actionRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+    }
+    private val actionLayer = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(20), dp(18), dp(20), dp(12))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(actionBadge, LinearLayout.LayoutParams(dp(38), dp(38)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+                addView(actionKind)
+                addView(actionText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        })
+        addView(actionRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+    }
+
+    // ── Drop target layer ───────────────────────────────────────────────────
+    private val dropIcon = ImageView(context).apply {
+        setImageResource(R.drawable.ic_drop)
+        imageTintList = ColorStateList.valueOf(Color.WHITE)
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(blue) }
+        val pad = dp(6)
+        setPadding(pad, pad, pad, pad)
+    }
+    private val dropTitle = label(14.5f, Color.WHITE, bold = true)
+    private val dropLayer = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        setPadding(dp(14), 0, dp(18), 0)
+        addView(dropIcon, LinearLayout.LayoutParams(dp(32), dp(32)))
+        addView(dropTitle, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(10) })
     }
 
     // ── Expanded media layer ────────────────────────────────────────────────
@@ -185,13 +288,13 @@ class IslandView(context: Context) : FrameLayout(context) {
         }, LinearLayout.LayoutParams(-1, WRAP_CONTENT).apply { topMargin = dp(4) })
     }
 
-    private val layers = listOf(compactLayer, notifLayer, mediaLayer)
+    private val layers = listOf(compactLayer, statusLayer, notifLayer, actionLayer, dropLayer, mediaLayer)
     private var currentLayer: View? = null
     private val layerAnims = HashMap<View, ValueAnimator>()
     private val fadeLevel = HashMap<View, Float>()
     private val blurLevel = HashMap<View, Float>()
 
-    // ── Springs & drawing ───────────────────────────────────────────────────
+    // ── Springs ─────────────────────────────────────────────────────────────
     private val sw = Spring(0f)
     private val sh = Spring(0f)
     private val sr = Spring(0f)
@@ -199,8 +302,6 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val springs = listOf(sw, sh, sr, sPress)
     private var running = false
     private var lastFrameNs = 0L
-    private val rect = RectF()
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private var shown = true
 
     private val frame = object : Choreographer.FrameCallback {
@@ -224,22 +325,45 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
+    // ── Glow ────────────────────────────────────────────────────────────────
+    private var glowColor = Color.WHITE
+    private var glowLevel = 0f
+    private var glowAnim: ValueAnimator? = null
+    private var pulsePhase = 0f
+    private val pulse = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1400
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = LinearInterpolator()
+        addUpdateListener {
+            pulsePhase = it.animatedValue as Float
+            glowView.invalidate()
+        }
+    }
+
     init {
-        setWillNotDraw(false)
-        clipToOutline = true
-        outlineProvider = object : ViewOutlineProvider() {
+        clipChildren = false
+        glowView.setWillNotDraw(false)
+        if (Build.VERSION.SDK_INT >= 31) {
+            glowView.setRenderEffect(RenderEffect.createBlurEffect(dp(14).toFloat(), dp(14).toFloat(), Shader.TileMode.DECAL))
+        }
+        addView(glowView, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
+        pillView.setWillNotDraw(false)
+        pillView.clipToOutline = true
+        pillView.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
                 outline.setRoundRect(
                     rect.left.roundToInt(), rect.top.roundToInt(),
                     rect.right.roundToInt(), rect.bottom.roundToInt(),
-                    min(sr.value * sPress.value, rect.height() / 2f),
+                    cornerRadius(),
                 )
             }
         }
+        addView(pillView, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         for (l in layers) {
             l.alpha = 0f
             l.visibility = INVISIBLE
-            addView(l, LayoutParams(1, 1, Gravity.TOP or Gravity.START))
+            pillView.addView(l, LayoutParams(1, 1, Gravity.TOP or Gravity.START))
         }
 
         val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -268,7 +392,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 return@setOnTouchListener false
             }
             when (ev.actionMasked) {
-                // iOS-style squish: the island swells slightly under your finger
+                // the island swells slightly under your finger
                 MotionEvent.ACTION_DOWN -> press(1.05f)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> press(1f)
             }
@@ -276,24 +400,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
-    // The window has a fixed size (set by the service); children get their own sizes.
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        for (i in 0 until childCount) {
-            val c = getChildAt(i)
-            val lp = c.layoutParams
-            c.measure(
-                MeasureSpec.makeMeasureSpec(max(lp.width, 0), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(max(lp.height, 0), MeasureSpec.EXACTLY),
-            )
-        }
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec))
-    }
-
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        for (i in 0 until childCount) {
-            val c = getChildAt(i)
-            c.layout(0, 0, c.measuredWidth, c.measuredHeight)
-        }
+        super.onLayout(changed, l, t, r, b)
         redraw()
     }
 
@@ -313,15 +421,12 @@ class IslandView(context: Context) : FrameLayout(context) {
         return handled
     }
 
-    override fun onDraw(canvas: Canvas) {
-        val r = min(sr.value * sPress.value, rect.height() / 2f)
-        canvas.drawRoundRect(rect, r, r, paint)
-    }
-
     override fun onDetachedFromWindow() {
         Choreographer.getInstance().removeFrameCallback(frame)
         running = false
         layerAnims.values.forEach { it.cancel() }
+        glowAnim?.cancel()
+        pulse.cancel()
         super.onDetachedFromWindow()
     }
 
@@ -331,9 +436,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         mode = Mode.IDLE
         compactBars.playing = false
         mediaBars.playing = false
+        setGlow(null)
         val g = geometry
         when {
-            // shrink back into the camera, like iPhone
+            // shrink back into the camera
             g.holeW > 0 -> morph(g.holeW, g.holeH, g.holeH / 2f, null)
             // no camera to hide in: keep a pill if wanted, otherwise melt into a dot
             cfg.showIdle && !cfg.fitCamera -> morph(dp(cfg.widthDp), compactH(), compactH() / 2f, null)
@@ -358,6 +464,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.color = m.accent
         compactBars.playing = m.playing
         mediaBars.playing = false
+        setGlow(m.accent, pulsing = m.playing)
         setShown(true)
         morph(compactWidth(), compactH(), compactH() / 2f, compactLayer)
     }
@@ -375,8 +482,41 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.visibility = GONE
         compactBars.playing = false
         mediaBars.playing = false
+        setGlow(if (plugged) green else null)
         setShown(true)
         morph(compactWidth(), compactH(), compactH() / 2f, compactLayer)
+    }
+
+    /** A short status: name on one side of the camera, value on the other. */
+    fun showStatus(icon: Int, tint: Int, title: String, value: String, valueColor: Int) {
+        val replacing = mode == Mode.STATUS
+        mode = Mode.STATUS
+        compactBars.playing = false
+        mediaBars.playing = false
+        val w = statusWidth()
+        val h = compactH()
+        sizeLayer(statusLayer, w, h)
+        val side = (w - dp(28) - statusGapWidth()) / 2
+        (statusTitle.layoutParams as LinearLayout.LayoutParams).width = side - dp(28)
+        (statusGap.layoutParams as LinearLayout.LayoutParams).width = statusGapWidth()
+        (statusValue.layoutParams as LinearLayout.LayoutParams).width = side
+        statusLayer.requestLayout()
+        val fill = {
+            statusIcon.setImageResource(icon)
+            statusIcon.imageTintList = ColorStateList.valueOf(tint)
+            statusTitle.text = title
+            statusValue.text = value
+            statusValue.setTextColor(valueColor)
+        }
+        setGlow(tint)
+        setShown(true)
+        if (replacing) {
+            swapContent(statusLayer, fill)
+            kick()
+        } else {
+            fill()
+        }
+        morph(w, h, h / 2f, statusLayer)
     }
 
     fun showNotification(icon: Drawable?, title: String, text: String) {
@@ -387,18 +527,62 @@ class IslandView(context: Context) : FrameLayout(context) {
         sizeLayer(notifLayer, w, h)
         compactBars.playing = false
         mediaBars.playing = false
+        setGlow(null)
         setShown(true)
         if (replacing) {
             // A newer notification takes over: the old content blurs away,
             // the new one blurs in, and the island gives a little kick.
-            swapContent(notifLayer) {
-                fillNotification(icon, title, text)
-            }
+            swapContent(notifLayer) { fillNotification(icon, title, text) }
             kick()
         } else {
             fillNotification(icon, title, text)
         }
         morph(w, h, h / 2f, notifLayer)
+    }
+
+    /** A card with suggestions, e.g. for a copied link: Open · Share. */
+    fun showActions(badge: Int, tint: Int, kind: String, text: String, actions: List<Action>) {
+        val replacing = mode == Mode.ACTIONS
+        mode = Mode.ACTIONS
+        compactBars.playing = false
+        mediaBars.playing = false
+        val w = expandedWidth()
+        val h = dp(158)
+        sizeLayer(actionLayer, w, h)
+        val fill = {
+            actionBadge.setImageResource(badge)
+            actionBadge.imageTintList = ColorStateList.valueOf(Color.WHITE)
+            actionBadge.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(tint) }
+            actionKind.text = kind.uppercase()
+            actionText.text = text
+            actionRow.removeAllViews()
+            for (a in actions.take(4)) actionRow.addView(actionButton(a), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        }
+        setGlow(tint)
+        setShown(true)
+        if (replacing) {
+            swapContent(actionLayer, fill)
+            kick()
+        } else {
+            fill()
+        }
+        morph(w, h, dp(40).toFloat(), actionLayer)
+    }
+
+    /** Something is being dragged: the island invites the drop, and grows when it's over it. */
+    fun showDropTarget(hovering: Boolean) {
+        val was = mode == Mode.DROP
+        mode = Mode.DROP
+        compactBars.playing = false
+        mediaBars.playing = false
+        dropTitle.text = if (hovering) "Let go to share" else "Drop here"
+        val w = if (hovering) dp(250) else dp(196)
+        val h = if (hovering) dp(64) else dp(52)
+        sizeLayer(dropLayer, w, h)
+        setGlow(blue, pulsing = !hovering)
+        setShown(true)
+        if (was && hovering) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        morph(w, h, h / 2f, dropLayer)
     }
 
     fun showMedia(m: MediaState) {
@@ -408,6 +592,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         sizeLayer(mediaLayer, w, h)
         updateMediaContent(m)
         compactBars.playing = false
+        setGlow(m.accent, pulsing = m.playing)
         setShown(true)
         morph(w, h, dp(46).toFloat(), mediaLayer)
     }
@@ -428,6 +613,8 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun compactH() = max(dp(cfg.heightDp), geometry.compactH)
 
+    private fun cornerRadius() = min(sr.value * sPress.value, rect.height() / 2f)
+
     private fun fillNotification(icon: Drawable?, title: String, text: String) {
         notifIcon.setImageDrawable(icon ?: context.getDrawable(R.mipmap.ic_launcher))
         notifTitle.text = title
@@ -444,7 +631,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         } else {
             mediaArt.setImageResource(R.drawable.ic_music)
             mediaArt.imageTintList = ColorStateList.valueOf(m.accent)
-            mediaArt.setBackgroundColor(0xFF2C2C2E.toInt())
+            mediaArt.setBackgroundColor(chip)
             mediaArt.setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         mediaTitle.text = m.title.ifBlank { "Now playing" }
@@ -474,6 +661,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         return gap + 2 * compactH() + dp(28)
     }
 
+    private fun statusGapWidth() = if (geometry.holeW > 0) geometry.holeW + dp(24) else dp(16)
+
+    private fun statusWidth() = min(expandedWidth(), statusGapWidth() + dp(2 * 98 + 28))
+
     private fun expandedWidth() = min(resources.displayMetrics.widthPixels - dp(20), dp(420))
 
     private fun sizeLayer(layer: View, w: Int, h: Int) {
@@ -489,21 +680,21 @@ class IslandView(context: Context) : FrameLayout(context) {
         if (layer !== currentLayer) swapContent(layer, null)
 
         val first = sw.value == 0f
+        if (!first && !running && sw.value == w.toFloat() && sh.value == h.toFloat() && sr.value == r) {
+            return // already there (e.g. the same state rendered again)
+        }
         val growing = w.toFloat() * h > sw.target * sh.target
         if (growing) {
-            // Opening: it stretches sideways first, then drops down, with one
-            // soft bounce at the end.
-            sw.tune(response = 0.42f, damping = 0.70f)
-            sh.tune(response = 0.52f, damping = 0.76f)
+            // Opening: it stretches sideways first, then drops down, with a
+            // lively bounce at the end.
+            sw.tune(response = 0.42f, damping = 0.66f)
+            sh.tune(response = 0.50f, damping = 0.72f)
             sr.tune(response = 0.50f, damping = 0.80f)
         } else {
             // Closing: it lifts up first, then narrows back into the camera.
-            sh.tune(response = 0.34f, damping = 0.92f)
-            sw.tune(response = 0.44f, damping = 0.88f)
+            sh.tune(response = 0.34f, damping = 0.90f)
+            sw.tune(response = 0.44f, damping = 0.84f)
             sr.tune(response = 0.40f, damping = 0.90f)
-        }
-        if (!first && !running && sw.value == w.toFloat() && sh.value == h.toFloat() && sr.value == r) {
-            return // already there (e.g. the same state rendered again)
         }
         sw.target = w.toFloat()
         sh.target = h.toFloat()
@@ -539,7 +730,7 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun onSettled() {
         if (!shown) alpha = 0f
-        val area = if (idleHidden || !shown) null else android.graphics.Rect(
+        val area = if (idleHidden || !shown) null else Rect(
             rect.left.toInt(), rect.top.toInt(), ceil(rect.right).toInt(), ceil(rect.bottom).toInt(),
         )
         callbacks?.onTouchArea(area)
@@ -557,8 +748,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         val top = topFor(h, ch)
         rect.set(left, top, left + w, top + h)
         for (l in layers) if (l.visibility == VISIBLE) applyLayer(l)
-        invalidateOutline()
-        invalidate()
+        pillView.invalidateOutline()
+        pillView.invalidate()
+        glowView.invalidate()
     }
 
     /**
@@ -589,6 +781,49 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
+    // ── Glow ────────────────────────────────────────────────────────────────
+
+    /** Light the island in `color` (null = off). Music makes it breathe. */
+    private fun setGlow(color: Int?, pulsing: Boolean = false) {
+        if (!cfg.glow) {
+            fadeGlowTo(0f)
+            pulse.cancel()
+            return
+        }
+        if (color != null) glowColor = color
+        fadeGlowTo(if (color != null) 1f else 0f)
+        if (pulsing && color != null) {
+            if (!pulse.isStarted) pulse.start()
+        } else {
+            pulse.cancel()
+            pulsePhase = 0f
+        }
+    }
+
+    private fun fadeGlowTo(target: Float) {
+        glowAnim?.cancel()
+        val from = glowLevel
+        if (from == target) return
+        glowAnim = ValueAnimator.ofFloat(from, target).apply {
+            duration = if (target > from) 420 else 260
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                glowLevel = it.animatedValue as Float
+                glowView.invalidate()
+            }
+            start()
+        }
+    }
+
+    private fun glowStrength(): Float {
+        val breathe = if (pulse.isRunning) 0.7f + 0.3f * sin(pulsePhase * 2f * Math.PI.toFloat()) else 1f
+        // a glow on a pill that's still tiny looks like a smudge: let it grow in with the island
+        val size = (rect.height() / max(1f, compactH().toFloat())).coerceIn(0f, 1f)
+        return glowLevel * breathe * size
+    }
+
+    // ── Content cross-fades ─────────────────────────────────────────────────
+
     private fun setShown(on: Boolean) {
         if (shown == on) return
         shown = on
@@ -604,8 +839,8 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     /**
      * Blur the old content out and the new content in. `update` runs while
-     * the outgoing content is invisible (used to swap a notification's text
-     * without the new words flashing up in the old layout).
+     * the outgoing content is invisible (used to swap text without the new
+     * words flashing up in the old layout).
      */
     private fun swapContent(layer: View?, update: (() -> Unit)?) {
         val old = currentLayer
@@ -638,13 +873,13 @@ class IslandView(context: Context) : FrameLayout(context) {
                 fadeLevel[l] = from + (to - from) * (it.animatedValue as Float)
                 applyLayer(l)
             }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
+            addListener(object : AnimatorListenerAdapter() {
                 private var cancelled = false
-                override fun onAnimationCancel(animation: android.animation.Animator) {
+                override fun onAnimationCancel(animation: Animator) {
                     cancelled = true
                 }
 
-                override fun onAnimationEnd(animation: android.animation.Animator) {
+                override fun onAnimationEnd(animation: Animator) {
                     if (layerAnims[l] === animation) layerAnims.remove(l)
                     if (cancelled) return
                     if (!show && currentLayer !== l) l.visibility = INVISIBLE
@@ -654,6 +889,40 @@ class IslandView(context: Context) : FrameLayout(context) {
             start()
         }
         redraw()
+    }
+
+    // ── Builders ────────────────────────────────────────────────────────────
+
+    private fun actionButton(a: Action) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        val iconView = ImageView(context).apply {
+            if (a.icon != null) {
+                // the real app's icon, like OriginOS's app suggestions
+                setImageDrawable(a.icon)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            } else {
+                setImageResource(a.glyph)
+                imageTintList = ColorStateList.valueOf(Color.WHITE)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                val pad = dp(11)
+                setPadding(pad, pad, pad, pad)
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(chip) }
+            }
+        }
+        addView(iconView, LinearLayout.LayoutParams(dp(44), dp(44)))
+        addView(label(11.5f, Color.WHITE).apply {
+            text = a.label
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(5) })
+        background = RippleDrawable(ColorStateList.valueOf(0x22FFFFFF), null, GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat(); setColor(Color.WHITE)
+        })
+        setPadding(0, dp(4), 0, dp(4))
+        setOnClickListener {
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            a.run()
+        }
     }
 
     private fun fmt(ms: Long): String {

@@ -46,6 +46,10 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swCharging, Prefs.CHARGING, d.charging)
         bindSwitch(R.id.swLandscape, Prefs.HIDE_LANDSCAPE, d.hideLandscape)
         bindSwitch(R.id.swFit, Prefs.FIT_CAMERA, d.fitCamera)
+        bindSwitch(R.id.swStatus, Prefs.STATUS, d.statusPopups)
+        bindSwitch(R.id.swCopy, Prefs.COPY, d.copySuggestions)
+        bindSwitch(R.id.swDrop, Prefs.DROP, d.dragDrop)
+        bindSwitch(R.id.swGlow, Prefs.GLOW, d.glow)
         findViewById<TextView>(R.id.fitInfo).text = cameraInfo()
 
         findViewById<Button>(R.id.btnA11y).setOnClickListener {
@@ -53,6 +57,13 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.btnNotif).setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        findViewById<Button>(R.id.btnBt).setOnClickListener {
+            if (Build.VERSION.SDK_INT >= 31 && !hasBluetooth()) {
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BT)
+            } else {
+                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            }
         }
         findViewById<Button>(R.id.btnPreview).setOnClickListener { preview() }
         findViewById<Button>(R.id.btnTest).setOnClickListener { sendTestNotification() }
@@ -69,7 +80,11 @@ class MainActivity : Activity() {
             .isNotificationListenerAccessGranted(ComponentName(this, IslandNotificationListener::class.java))
         setStatus(R.id.statusA11y, R.id.btnA11y, a11y, "Island is on screen", "Turn on “Island” in Accessibility")
         setStatus(R.id.statusNotif, R.id.btnNotif, listener, "Pop-outs & music active", "Allow notification access")
+        setStatus(R.id.statusBt, R.id.btnBt, hasBluetooth(), "Shows your earbuds when they connect", "Allow nearby devices (Bluetooth)")
     }
+
+    private fun hasBluetooth() = Build.VERSION.SDK_INT < 31 ||
+        checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     private fun setStatus(statusId: Int, buttonId: Int, on: Boolean, onText: String, offText: String) {
         findViewById<TextView>(statusId).apply {
@@ -178,11 +193,13 @@ class MainActivity : Activity() {
         if (requestCode == REQ_NOTIF && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             sendTestNotification()
         }
+        if (requestCode == REQ_BT) onResume()
     }
 
     private companion object {
         const val CHANNEL = "test"
         const val TEST_ID = 42
         const val REQ_NOTIF = 7
+        const val REQ_BT = 8
     }
 }
