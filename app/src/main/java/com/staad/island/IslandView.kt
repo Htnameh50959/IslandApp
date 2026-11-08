@@ -66,6 +66,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onPrev()
         fun onPlayPause()
         fun onNext()
+        /** Where the settled island is (window coordinates), or null when it shouldn't take touches. */
+        fun onTouchArea(area: android.graphics.Rect?)
     }
 
     enum class Mode { IDLE, COMPACT_MEDIA, CHARGING, NOTIFICATION, MEDIA }
@@ -186,6 +188,8 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val layers = listOf(compactLayer, notifLayer, mediaLayer)
     private var currentLayer: View? = null
     private val layerAnims = HashMap<View, ValueAnimator>()
+    private val fadeLevel = HashMap<View, Float>()
+    private val blurLevel = HashMap<View, Float>()
 
     // ── Springs & drawing ───────────────────────────────────────────────────
     private val sw = Spring(0f)
@@ -193,12 +197,9 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val sr = Spring(0f)
     private val sPress = Spring(1f).apply { tune(response = 0.28f, damping = 0.6f) }
     private val springs = listOf(sw, sh, sr, sPress)
-    private var frameW = 0
-    private var frameH = 0
     private var running = false
     private var lastFrameNs = 0L
     private val rect = RectF()
-    private val loc = IntArray(2)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private var shown = true
 
@@ -216,7 +217,6 @@ class IslandView(context: Context) : FrameLayout(context) {
             if (settled) {
                 running = false
                 lastFrameNs = 0L
-                fitFrame(exact = true) // hand the spare window area back to the apps underneath
                 onSettled()
             } else {
                 Choreographer.getInstance().postFrameCallback(this)
@@ -276,7 +276,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
-    // The window wraps exactly this size; see fitFrame().
+    // The window has a fixed size (set by the service); children get their own sizes.
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         for (i in 0 until childCount) {
             val c = getChildAt(i)
@@ -286,7 +286,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 MeasureSpec.makeMeasureSpec(max(lp.height, 0), MeasureSpec.EXACTLY),
             )
         }
-        setMeasuredDimension(max(frameW, 1), max(frameH, 1))
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec))
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -297,12 +297,20 @@ class IslandView(context: Context) : FrameLayout(context) {
         redraw()
     }
 
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+    /**
+     * Touches arrive from the small touch window that sits over the settled
+     * island; (dx, dy) moves them into this window's coordinates.
+     */
+    fun forwardTouch(ev: MotionEvent, dx: Float, dy: Float): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) {
             callbacks?.onOutsideTouch()
             return true
         }
-        return super.dispatchTouchEvent(ev)
+        val e = MotionEvent.obtain(ev)
+        e.offsetLocation(dx, dy)
+        val handled = dispatchTouchEvent(e)
+        e.recycle()
+        return handled
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -482,25 +490,36 @@ class IslandView(context: Context) : FrameLayout(context) {
 
         val first = sw.value == 0f
         val growing = w.toFloat() * h > sw.target * sh.target
-        // Opening: lively with a little overshoot. Closing: quicker and calm.
-        val (response, damping) = if (growing) 0.48f to 0.72f else 0.40f to 0.92f
-        for (s in listOf(sw, sh, sr)) s.tune(response, damping)
+        if (growing) {
+            // Opening: it stretches sideways first, then drops down, with one
+            // soft bounce at the end.
+            sw.tune(response = 0.42f, damping = 0.70f)
+            sh.tune(response = 0.52f, damping = 0.76f)
+            sr.tune(response = 0.50f, damping = 0.80f)
+        } else {
+            // Closing: it lifts up first, then narrows back into the camera.
+            sh.tune(response = 0.34f, damping = 0.92f)
+            sw.tune(response = 0.44f, damping = 0.88f)
+            sr.tune(response = 0.40f, damping = 0.90f)
+        }
+        if (!first && !running && sw.value == w.toFloat() && sh.value == h.toFloat() && sr.value == r) {
+            return // already there (e.g. the same state rendered again)
+        }
         sw.target = w.toFloat()
         sh.target = h.toFloat()
         sr.target = r
         if (first) {
             springs.forEach { it.snap() }
-            fitFrame(exact = true)
             redraw()
+            onSettled()
             return
         }
-        fitFrame(exact = false)
+        callbacks?.onTouchArea(null) // until it settles in its new shape
         start()
     }
 
     private fun press(scale: Float) {
         sPress.target = scale
-        fitFrame(exact = false)
         start()
     }
 
@@ -508,7 +527,6 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun kick() {
         sw.velocity += dp(260)
         sh.velocity += dp(60)
-        fitFrame(exact = false)
         start()
     }
 
@@ -521,33 +539,10 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun onSettled() {
         if (!shown) alpha = 0f
-    }
-
-    /**
-     * Size the window. While animating, leave room for the overshoot so the
-     * window rarely needs resizing mid-flight; once settled, wrap the pill
-     * exactly so the rest of the status bar stays tappable.
-     */
-    private fun fitFrame(exact: Boolean) {
-        val ch = compactH().toFloat()
-        val w: Int
-        val h: Int
-        if (exact) {
-            w = ceil(sw.value * sPress.value).toInt()
-            h = ceil(max(ch, topFor(sh.value * sPress.value, ch) + sh.value * sPress.value)).toInt()
-        } else {
-            val maxW = max(sw.value, sw.target) * 1.12f + dp(24)
-            val maxH = max(sh.value, sh.target) * 1.12f + dp(12)
-            w = max(frameW, ceil(maxW).toInt()).let {
-                if (geometry.screenW > 0) min(it, geometry.screenW) else it
-            }
-            h = max(frameH, ceil(max(ch, maxH)).toInt())
-        }
-        if (w != frameW || h != frameH) {
-            frameW = w
-            frameH = h
-            requestLayout()
-        }
+        val area = if (idleHidden || !shown) null else android.graphics.Rect(
+            rect.left.toInt(), rect.top.toInt(), ceil(rect.right).toInt(), ceil(rect.bottom).toInt(),
+        )
+        callbacks?.onTouchArea(area)
     }
 
     private fun topFor(h: Float, ch: Float) = max(0f, (ch - h) / 2f)
@@ -557,25 +552,41 @@ class IslandView(context: Context) : FrameLayout(context) {
         val w = sw.value * ps
         val h = sh.value * ps
         val ch = compactH().toFloat()
-        // Centre on the anchor using where the window really is on screen:
-        // Android may pin a wide window to the screen edge rather than
-        // centring it, and a resize can reach the screen a frame late.
-        val left = if (geometry.screenW > 0 && isAttachedToWindow) {
-            getLocationOnScreen(loc)
-            geometry.anchorX - loc[0] - w / 2f
-        } else {
-            ((if (width > 0) width else frameW) - w) / 2f
-        }
+        // the window spans the screen width, so window x == screen x
+        val left = geometry.anchorX - w / 2f
         val top = topFor(h, ch)
         rect.set(left, top, left + w, top + h)
-        for (l in layers) {
-            if (l.visibility != VISIBLE) continue
-            val lp = l.layoutParams
-            l.translationX = rect.centerX() - lp.width / 2f
-            l.translationY = rect.top + (rect.height() - lp.height) / 2f
-        }
+        for (l in layers) if (l.visibility == VISIBLE) applyLayer(l)
         invalidateOutline()
         invalidate()
+    }
+
+    /**
+     * Content lives *inside* the island: it is scaled to fit the pill's
+     * current size, so it grows out of the camera as the island opens and
+     * shrinks back into it as it closes, blurred while it's small. On top of
+     * that, `fadeLevel` cross-fades content that is arriving or leaving.
+     */
+    private fun applyLayer(l: View) {
+        val lp = l.layoutParams
+        if (lp.width <= 1 || lp.height <= 1) return
+        val a = fadeLevel[l] ?: l.alpha
+        val fit = min(rect.width() / lp.width, rect.height() / lp.height).coerceIn(0.3f, 1f)
+        val readable = ((fit - 0.45f) / 0.4f).coerceIn(0f, 1f)
+        val s = fit * (0.94f + 0.06f * a)
+        l.scaleX = s
+        l.scaleY = s
+        l.alpha = a * readable
+        l.translationX = rect.centerX() - lp.width / 2f
+        l.translationY = rect.centerY() - lp.height / 2f
+        if (Build.VERSION.SDK_INT >= 31) {
+            val amount = max(1f - a, (1f - fit) * 1.6f).coerceIn(0f, 1f)
+            val b = (amount * dp(14)).let { if (it < 0.5f) 0f else it }
+            if (abs(b - (blurLevel[l] ?: 0f)) > 0.4f || (b == 0f && blurLevel[l] != 0f)) {
+                blurLevel[l] = b
+                l.setRenderEffect(if (b == 0f) null else RenderEffect.createBlurEffect(b, b, Shader.TileMode.DECAL))
+            }
+        }
     }
 
     private fun setShown(on: Boolean) {
@@ -608,7 +619,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             })
         } else {
             update?.invoke()
-            fade(layer, show = true, delay = if (old != null) 70L else 110L)
+            fade(layer, show = true, delay = if (old != null) 60L else 30L)
         }
     }
 
@@ -617,25 +628,15 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun fade(l: View, show: Boolean, delay: Long, onEnd: (() -> Unit)? = null) {
         layerAnims.remove(l)?.cancel()
         if (show) l.visibility = VISIBLE
-        val from = l.alpha
+        val from = fadeLevel[l] ?: 0f
         val to = if (show) 1f else 0f
-        val blurMax = dp(14).toFloat()
         layerAnims[l] = ValueAnimator.ofFloat(0f, 1f).apply {
             startDelay = delay
-            duration = if (show) 300 else 110
+            duration = if (show) 280 else 120
             interpolator = if (show) easeOut else DecelerateInterpolator()
             addUpdateListener {
-                val a = from + (to - from) * (it.animatedValue as Float)
-                l.alpha = a
-                val s = 0.9f + 0.1f * a
-                l.scaleX = s
-                l.scaleY = s
-                if (Build.VERSION.SDK_INT >= 31) {
-                    val b = (1f - a) * blurMax
-                    l.setRenderEffect(
-                        if (b < 0.5f) null else RenderEffect.createBlurEffect(b, b, Shader.TileMode.DECAL)
-                    )
-                }
+                fadeLevel[l] = from + (to - from) * (it.animatedValue as Float)
+                applyLayer(l)
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 private var cancelled = false

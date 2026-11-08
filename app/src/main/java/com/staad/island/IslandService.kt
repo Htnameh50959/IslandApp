@@ -49,6 +49,12 @@ class IslandService : AccessibilityService(),
     private var wm: WindowManager? = null
     private var island: IslandView? = null
     private var params: WindowManager.LayoutParams? = null
+    // Small invisible window over the settled island that takes its touches.
+    // The drawing window never moves or resizes (that's what keeps the
+    // animation smooth) and lets every touch through.
+    private var touchPad: View? = null
+    private var touchParams: WindowManager.LayoutParams? = null
+    private var touchArea: Rect? = null
     private val handler = Handler(Looper.getMainLooper())
     private var cfg = IslandConfig.DEFAULT
 
@@ -94,14 +100,13 @@ class IslandService : AccessibilityService(),
             it.callbacks = this
         }
         val lp = WindowManager.LayoutParams(
-            WRAP_CONTENT, WRAP_CONTENT,
+            WRAP_CONTENT, WRAP_CONTENT, // applyPosition() sets the real size
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or FLAG_LAYOUT_NO_LIMITS or
-                FLAG_WATCH_OUTSIDE_TOUCH or FLAG_HARDWARE_ACCELERATED,
+            FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE or FLAG_LAYOUT_IN_SCREEN or
+                FLAG_LAYOUT_NO_LIMITS or FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            // centred on the anchor (camera); applyPosition() sets x/y
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.START
             title = "Island"
             layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -110,11 +115,35 @@ class IslandService : AccessibilityService(),
             }
             if (Build.VERSION.SDK_INT >= 30) fitInsetsTypes = 0
         }
+        val pad = View(this).apply {
+            setOnTouchListener { _, ev ->
+                val area = touchArea
+                val tp = touchParams
+                val dp = params
+                if (area == null || tp == null || dp == null) return@setOnTouchListener false
+                island?.forwardTouch(ev, (tp.x - dp.x).toFloat(), (tp.y - dp.y).toFloat()) ?: false
+            }
+        }
+        val tlp = WindowManager.LayoutParams(
+            1, 1,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE or FLAG_LAYOUT_IN_SCREEN or
+                FLAG_LAYOUT_NO_LIMITS or FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            title = "Island touch"
+            layoutInDisplayCutoutMode = lp.layoutInDisplayCutoutMode
+            if (Build.VERSION.SDK_INT >= 30) fitInsetsTypes = 0
+        }
         wm = windowManager
         island = view
         params = lp
+        touchPad = pad
+        touchParams = tlp
         applyPosition(update = false)
         windowManager.addView(view, lp)
+        windowManager.addView(pad, tlp)
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_POWER_CONNECTED)
@@ -159,7 +188,9 @@ class IslandService : AccessibilityService(),
         }
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(this)
         island?.let { v -> runCatching { wm?.removeView(v) } }
+        touchPad?.let { v -> runCatching { wm?.removeView(v) } }
         island = null
+        touchPad = null
     }
 
     override fun onSharedPreferenceChanged(prefs: SharedPreferences?, key: String?) {
@@ -220,13 +251,30 @@ class IslandService : AccessibilityService(),
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val visible = cfg.enabled && !(landscape && cfg.hideLandscape)
         v.visibility = if (visible) View.VISIBLE else View.GONE
-        // A hidden idle pill must not swallow taps on the status bar beneath it.
-        val touchable = visible && !v.idleHidden
-        val flags = if (touchable) lp.flags and FLAG_NOT_TOUCHABLE.inv() else lp.flags or FLAG_NOT_TOUCHABLE
-        if (flags != lp.flags) {
-            lp.flags = flags
-            updateWindow()
+        if (!visible) onTouchArea(null)
+    }
+
+    // The island settled somewhere (or is moving / hidden: null). Put the
+    // touch window exactly over it, or make it let everything through.
+    override fun onTouchArea(area: Rect?) {
+        val pad = touchPad ?: return
+        val tp = touchParams ?: return
+        val dp = params ?: return
+        val usable = area?.takeIf { island?.visibility == View.VISIBLE && !it.isEmpty }
+        touchArea = usable
+        if (usable == null) {
+            if (tp.flags and FLAG_NOT_TOUCHABLE == 0) {
+                tp.flags = tp.flags or FLAG_NOT_TOUCHABLE
+                runCatching { wm?.updateViewLayout(pad, tp) }
+            }
+            return
         }
+        tp.flags = tp.flags and FLAG_NOT_TOUCHABLE.inv()
+        tp.x = dp.x + usable.left
+        tp.y = dp.y + usable.top
+        tp.width = usable.width()
+        tp.height = usable.height()
+        if (pad.isAttachedToWindow) runCatching { wm?.updateViewLayout(pad, tp) }
     }
 
     /**
@@ -269,8 +317,13 @@ class IslandService : AccessibilityService(),
         val pillH = maxOf(compactH, holeH + (8 * d).roundToInt())
         val centreX = anchorX + (cfg.offsetXDp * d).roundToInt()
         v.geometry = IslandView.Geometry(holeW, holeH, pillH, centreX, screen.x)
-        lp.x = anchorX - screen.x / 2 + (cfg.offsetXDp * d).roundToInt()
+        // One fixed window across the top, tall enough for the biggest state
+        // (the media player) plus its bounce. It is never resized while the
+        // island animates.
+        lp.x = 0
         lp.y = maxOf(0, anchorY - pillH / 2) + (cfg.offsetYDp * d).roundToInt()
+        lp.width = screen.x
+        lp.height = (260 * d).roundToInt()
         if (update) updateWindow()
     }
 
