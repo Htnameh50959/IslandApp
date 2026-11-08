@@ -29,15 +29,15 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
 
     private val pm: PackageManager = ctx.packageManager
 
-    /** A card for copied text, or null when it isn't a link / number / email. */
+    /** A card for anything copied: links, numbers and emails get their own buttons. */
     fun forCopied(raw: String): Card? {
         val t = raw.trim()
-        if (t.isEmpty() || t.length > 2000) return null
+        if (t.isEmpty()) return null
         return when {
             isLink(t) -> linkCard(t, "Link copied")
             isEmail(t) -> emailCard(t, "Email copied")
             isPhone(t) -> phoneCard(t, "Number copied")
-            else -> null
+            else -> copiedTextCard(t)
         }
     }
 
@@ -107,12 +107,25 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         ),
     )
 
+    private fun copiedTextCard(t: String): Card {
+        val actions = mutableListOf(
+            app("Search", R.drawable.ic_search, Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, t.take(500))),
+        )
+        val translate = Intent(Intent.ACTION_TRANSLATE).putExtra(Intent.EXTRA_TEXT, t)
+        if (resolves(translate)) actions += app("Translate", R.drawable.ic_search, translate)
+        actions += chooser("Share", R.drawable.ic_share, Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t))
+        return Card(R.drawable.ic_copy, GREY, "Text copied", t.replace(Regex("\\s+"), " ").take(200), actions)
+    }
+
+    private fun resolves(intent: Intent) =
+        runCatching { pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null }.getOrDefault(false)
+
     private fun textCard(t: String): Card = Card(
         R.drawable.ic_share, BLUE, "Text dropped", t.replace(Regex("\\s+"), " "),
         listOf(
             chooser("Share", R.drawable.ic_share, Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t)),
             app("Search", R.drawable.ic_search, Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, t)),
-            IslandView.Action("Copy", null, R.drawable.ic_link) {
+            IslandView.Action("Copy", null, R.drawable.ic_copy) {
                 ctx.getSystemService(ClipboardManager::class.java)
                     ?.setPrimaryClip(ClipData.newPlainText("Island", t))
                 done()
@@ -164,5 +177,6 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         const val BLUE = 0xFF0A84FF.toInt()
         const val GREEN = 0xFF30D158.toInt()
         const val ORANGE = 0xFFFF9F0A.toInt()
+        const val GREY = 0xFF636366.toInt()
     }
 }

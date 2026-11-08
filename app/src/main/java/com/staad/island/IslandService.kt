@@ -236,18 +236,23 @@ class IslandService : AccessibilityService(),
         Prefs.get(this).registerOnSharedPreferenceChangeListener(this)
         IslandBus.listener = this // replays current media state → render()
         render()
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "service connected")
     }
 
     /**
      * Copy suggestions. Android doesn't let a background app read the
-     * clipboard, so notice copying instead:
-     *  1. remember the text you select, and when you tap "Copy", that's it;
-     *  2. Android 13+ shows a "copied" preview from System UI: read its text.
-     * Nothing is stored: the text only lives in memory long enough to show
-     * the card.
+     * clipboard, so first notice that something was copied:
+     *  - you tapped a "Copy…" button or menu item (any app), or
+     *  - the app showed a "…copied" toast, or
+     *  - System UI showed its "copied" preview (Android 13+),
+     * then briefly take focus, which is when Android allows reading the
+     * clipboard (Android shows a small "pasted from your clipboard" note).
+     * If that fails, fall back to the text you had selected.
+     * Nothing is stored: the text only lives in memory to show the card.
      */
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         e ?: return
+        if (DEBUG_COPY) debugEvent(e)
         if (!cfg.copySuggestions) return
         when (e.eventType) {
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
@@ -260,19 +265,31 @@ class IslandService : AccessibilityService(),
                 }
             }
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                val label = (e.text?.joinToString(" ") ?: "") + (e.contentDescription ?: "")
-                if (label.trim().lowercase() !in copyLabels) return
-                val sel = lastSelection
-                if (sel != null && SystemClock.uptimeMillis() - lastSelectionAt < 60_000) {
-                    onCopied(sel)
-                } else {
-                    // no selection seen: the System UI preview may still tell us
-                    handler.postDelayed({ readClipboardPreview() }, 250)
-                }
+                val label = ((e.text?.joinToString(" ") ?: "") + " " + (e.contentDescription ?: "")).lowercase()
+                if (!COPY_WORD.containsMatchIn(label) && copyLabels.none { label.trim() == it }) return
+                val sel = lastSelection?.takeIf { SystemClock.uptimeMillis() - lastSelectionAt < 60_000 }
+                // give the app a moment to actually put it on the clipboard
+                handler.postDelayed({ grabClipboard(sel) }, 150)
+            }
+            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                // a toast like "Message copied" / "Copied to clipboard"
+                if (e.parcelableData != null) return // a real notification, not a toast
+                val text = e.text?.joinToString(" ")?.lowercase() ?: return
+                if (COPY_WORD.containsMatchIn(text) || "copied" in text) handler.postDelayed({ grabClipboard(null) }, 100)
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
                 if (e.packageName == "com.android.systemui") readClipboardPreview()
         }
+    }
+
+    // TEMP: what the phone reports around copying (labels and lengths only, never the text)
+    private fun debugEvent(e: AccessibilityEvent) {
+        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && e.packageName != "com.android.systemui") return
+        val label = when (e.eventType) {
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> "len=${e.text?.firstOrNull()?.length} sel=${e.fromIndex}..${e.toIndex}"
+            else -> ((e.text?.joinToString("|") ?: "") + " cd=" + (e.contentDescription ?: "")).take(60)
+        }
+        android.util.Log.i("IslandCopy", "${AccessibilityEvent.eventTypeToString(e.eventType)} pkg=${e.packageName} cls=${e.className} $label")
     }
 
     private fun readClipboardPreview() {
@@ -286,6 +303,57 @@ class IslandService : AccessibilityService(),
             if (!text.isNullOrBlank()) onCopied(text)
             return
         }
+    }
+
+    private var grabView: View? = null
+    private var grabFallback: String? = null
+    private val endGrab = Runnable { releaseClipboardFocus() }
+
+    /** Take focus for a moment so Android lets us read the clipboard. */
+    private fun grabClipboard(fallback: String?) {
+        if (grabView != null) return
+        val w = wm ?: return
+        grabFallback = fallback
+        val v = object : View(this) {
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                if (!hasWindowFocus) return
+                val text = runCatching {
+                    getSystemService(ClipboardManager::class.java)?.primaryClip
+                        ?.getItemAt(0)?.coerceToText(this@IslandService)?.toString()
+                }.getOrNull()
+                if (DEBUG_COPY) android.util.Log.i("IslandCopy", "focus grab read: ${text?.length ?: "null"}")
+                if (!text.isNullOrBlank()) {
+                    grabFallback = null
+                    onCopied(text)
+                }
+                handler.post(endGrab)
+            }
+        }
+        val lp = WindowManager.LayoutParams(
+            1, 1,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            // focusable, but not for the keyboard, so typing in the app isn't disturbed
+            FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            title = "Island clipboard"
+        }
+        if (runCatching { w.addView(v, lp) }.isFailure) {
+            fallback?.let { onCopied(it) }
+            return
+        }
+        grabView = v
+        handler.postDelayed(endGrab, 900)
+    }
+
+    private fun releaseClipboardFocus() {
+        handler.removeCallbacks(endGrab)
+        grabView?.let { v -> runCatching { wm?.removeView(v) } }
+        grabView = null
+        grabFallback?.let { onCopied(it) }
+        grabFallback = null
     }
 
     private fun onCopied(text: String) {
@@ -429,6 +497,8 @@ class IslandService : AccessibilityService(),
         runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
         island?.let { v -> runCatching { wm?.removeView(v) } }
         touchPad?.let { v -> runCatching { wm?.removeView(v) } }
+        grabView?.let { v -> runCatching { wm?.removeView(v) } }
+        grabView = null
         island = null
         touchPad = null
     }
@@ -443,6 +513,7 @@ class IslandService : AccessibilityService(),
     // ── Events from the listener ────────────────────────────────────────────
 
     override fun onNotification(event: NotifEvent) {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "notification from ${event.packageName}")
         if (!cfg.notifications) return
         notif = event
         notifShownAt = SystemClock.uptimeMillis()
@@ -733,6 +804,8 @@ class IslandService : AccessibilityService(),
 
     private companion object {
         // not in the public SDK, but sent by Android when a headset reports its battery
+        const val DEBUG_COPY = false
+        val COPY_WORD = Regex("\\bcopy\\b")
         const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
         const val BLUE = 0xFF0A84FF.toInt()
