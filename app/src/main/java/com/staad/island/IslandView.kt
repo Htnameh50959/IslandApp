@@ -214,7 +214,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             addView(actionBadge, LinearLayout.LayoutParams(dp(38), dp(38)))
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), 0, 0, 0)
+                setPadding(dp(12), 0, dp(8), 0)
                 addView(actionKind)
                 addView(actionText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
@@ -379,8 +379,12 @@ class IslandView(context: Context) : FrameLayout(context) {
                 callbacks?.onLongPress()
             }
 
+            // Swipe it away: up, or flick it sideways
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-                if (vy < -500 && abs(vy) > abs(vx)) {
+                val up = vy < -500 && abs(vy) > abs(vx)
+                val sideways = abs(vx) > 700 && abs(vx) > abs(vy)
+                if (up || sideways) {
+                    performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                     callbacks?.onSwipeUp()
                     return true
                 }

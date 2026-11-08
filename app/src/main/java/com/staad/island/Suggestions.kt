@@ -114,8 +114,15 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         val translate = Intent(Intent.ACTION_TRANSLATE).putExtra(Intent.EXTRA_TEXT, t)
         if (resolves(translate)) actions += app("Translate", R.drawable.ic_search, translate)
         actions += chooser("Share", R.drawable.ic_share, Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t))
-        return Card(R.drawable.ic_copy, GREY, "Text copied", t.replace(Regex("\\s+"), " ").take(200), actions)
+        // looks like a password: never put it on screen
+        val shown = if (looksSecret(t)) "••••••••" else t.replace(Regex("\\s+"), " ").take(200)
+        return Card(R.drawable.ic_copy, GREY, "Text copied", shown, actions)
     }
+
+    /** One word, 8–64 characters, mixing letters and digits, and not a web address. */
+    private fun looksSecret(t: String) = !t.any { it.isWhitespace() } && t.length in 8..64 &&
+        t.any { it.isLetter() } && t.any { it.isDigit() } &&
+        !Regex("^[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$").matches(t)
 
     private fun resolves(intent: Intent) =
         runCatching { pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null }.getOrDefault(false)

@@ -180,24 +180,36 @@ class IslandService : AccessibilityService(),
             if (Build.VERSION.SDK_INT >= 30) fitInsetsTypes = 0
         }
         val pad = View(this).apply {
+            // An empty window never draws, and on Android 12+ a window's new
+            // size and touchability only reach the input system with its next
+            // drawn frame. A practically invisible background makes it draw.
+            setBackgroundColor(0x01000000)
             setOnTouchListener { _, ev ->
                 val area = touchArea
                 val tp = touchParams
                 val dp = params
+                if (DEBUG_COPY) android.util.Log.i("IslandCopy", "pad touch ${ev.actionMasked} at ${ev.x},${ev.y} area=$area")
                 if (area == null || tp == null || dp == null) return@setOnTouchListener false
-                island?.forwardTouch(ev, (tp.x - dp.x).toFloat(), (tp.y - dp.y).toFloat()) ?: false
+                val r = island?.forwardTouch(ev, (tp.x - dp.x).toFloat(), (tp.y - dp.y).toFloat()) ?: false
+                if (DEBUG_COPY) android.util.Log.i("IslandCopy", "forwarded -> $r")
+                r
             }
             setOnDragListener { _, e -> onDrag(e) }
         }
+        // Always touchable: on some phones (this vivo, Android 15) switching
+        // FLAG_NOT_TOUCHABLE on a live window never reaches the input system,
+        // so instead the window is parked off-screen when it shouldn't take touches.
         val tlp = WindowManager.LayoutParams(
             1, 1,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE or FLAG_LAYOUT_IN_SCREEN or
-                FLAG_LAYOUT_NO_LIMITS or FLAG_WATCH_OUTSIDE_TOUCH,
+            FLAG_NOT_FOCUSABLE or FLAG_LAYOUT_IN_SCREEN or
+                FLAG_LAYOUT_NO_LIMITS or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             title = "Island touch"
+            x = PARKED
+            y = PARKED
             layoutInDisplayCutoutMode = lp.layoutInDisplayCutoutMode
             if (Build.VERSION.SDK_INT >= 30) fitInsetsTypes = 0
         }
@@ -440,6 +452,7 @@ class IslandService : AccessibilityService(),
     // screen…) can drop text, links and photos on the island to share them.
 
     private fun onDrag(e: DragEvent): Boolean {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "drag ${e.action}")
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
                 if (!cfg.dragDrop || island?.visibility != View.VISIBLE) return false
@@ -474,12 +487,12 @@ class IslandService : AccessibilityService(),
         val pad = touchPad ?: return
         val tp = touchParams ?: return
         val screen = screenSize()
-        tp.flags = tp.flags and FLAG_NOT_TOUCHABLE.inv()
         tp.x = 0
         tp.y = 0
         tp.width = screen.x
         tp.height = (150 * resources.displayMetrics.density).roundToInt()
         runCatching { wm?.updateViewLayout(pad, tp) }
+        pad.invalidate()
     }
 
     override fun onInterrupt() = Unit
@@ -555,6 +568,11 @@ class IslandService : AccessibilityService(),
 
     private fun render() {
         val v = island ?: return
+        if (DEBUG_COPY) android.util.Log.i(
+            "IslandCopy",
+            "render drop=$dropActive card=${card != null} notif=${notif != null} status=${status != null} " +
+                "charge=${charge != null} media=${media != null} exp=$mediaExpanded cfgNotif=${cfg.notifications} enabled=${cfg.enabled}",
+        )
         val m = media?.takeIf { cfg.media }
         if (m == null) mediaExpanded = false
         val n = notif
@@ -588,6 +606,7 @@ class IslandService : AccessibilityService(),
     // The island settled somewhere (or is moving / hidden: null). Put the
     // touch window exactly over it, or make it let everything through.
     override fun onTouchArea(area: Rect?) {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "touchArea $area drop=$dropActive vis=${island?.visibility}")
         if (dropActive) return // the drop zone owns the touch window until the drag ends
         val pad = touchPad ?: return
         val tp = touchParams ?: return
@@ -595,18 +614,21 @@ class IslandService : AccessibilityService(),
         val usable = area?.takeIf { island?.visibility == View.VISIBLE && !it.isEmpty }
         touchArea = usable
         if (usable == null) {
-            if (tp.flags and FLAG_NOT_TOUCHABLE == 0) {
-                tp.flags = tp.flags or FLAG_NOT_TOUCHABLE
+            if (tp.x != PARKED || tp.width != 1) {
+                tp.x = PARKED
+                tp.y = PARKED
+                tp.width = 1
+                tp.height = 1
                 runCatching { wm?.updateViewLayout(pad, tp) }
             }
             return
         }
-        tp.flags = tp.flags and FLAG_NOT_TOUCHABLE.inv()
         tp.x = dp.x + usable.left
         tp.y = dp.y + usable.top
         tp.width = usable.width()
         tp.height = usable.height()
-        if (pad.isAttachedToWindow) runCatching { wm?.updateViewLayout(pad, tp) }
+        runCatching { wm?.updateViewLayout(pad, tp) }
+        pad.invalidate()
     }
 
     /**
@@ -695,11 +717,16 @@ class IslandService : AccessibilityService(),
     // ── Gestures ────────────────────────────────────────────────────────────
 
     override fun onTap() {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "tap")
         val v = island ?: return
         when (v.mode) {
             Mode.NOTIFICATION -> notif?.let { openNotification(it) }
-            // tapping the card (not a button) does the first suggestion
-            Mode.ACTIONS -> card?.actions?.firstOrNull()?.run?.invoke()
+            // tapping the card itself (not one of its buttons) closes it
+            Mode.ACTIONS -> {
+                handler.removeCallbacks(clearCard)
+                card = null
+                render()
+            }
             Mode.STATUS -> {
                 handler.removeCallbacks(clearStatus)
                 status = null
@@ -731,7 +758,11 @@ class IslandService : AccessibilityService(),
         }
     }
 
-    override fun onSwipeUp() = dismissAll()
+    override fun onSwipeUp() {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "swipe up")
+        dismissAll()
+    }
+
 
     override fun onOutsideTouch() {
         var changed = false
@@ -820,6 +851,8 @@ class IslandService : AccessibilityService(),
     private companion object {
         // not in the public SDK, but sent by Android when a headset reports its battery
         const val DEBUG_COPY = false
+        /** Off-screen spot for the touch window when the island shouldn't take touches. */
+        const val PARKED = -200
         val COPY_WORD = Regex("\\bcopy\\b")
         const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
