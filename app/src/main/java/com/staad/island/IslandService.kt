@@ -306,12 +306,17 @@ class IslandService : AccessibilityService(),
     }
 
     private var grabView: View? = null
+    private var lastGrabAt = 0L
     private var grabFallback: String? = null
     private val endGrab = Runnable { releaseClipboardFocus() }
 
     /** Take focus for a moment so Android lets us read the clipboard. */
     private fun grabClipboard(fallback: String?) {
-        if (grabView != null) return
+        // one copy can announce itself twice (WhatsApp: Android's "Copied"
+        // and then its own "Message copied"): read the clipboard only once
+        val now = SystemClock.uptimeMillis()
+        if (grabView != null || now - lastGrabAt < 3000) return
+        lastGrabAt = now
         val w = wm ?: return
         grabFallback = fallback
         val v = object : View(this) {
