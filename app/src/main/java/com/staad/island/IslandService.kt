@@ -275,7 +275,11 @@ class IslandService : AccessibilityService(),
                 // a toast like "Message copied" / "Copied to clipboard"
                 if (e.parcelableData != null) return // a real notification, not a toast
                 val text = e.text?.joinToString(" ")?.lowercase() ?: return
-                if (COPY_WORD.containsMatchIn(text) || "copied" in text) handler.postDelayed({ grabClipboard(null) }, 100)
+                if (!(COPY_WORD.containsMatchIn(text) || "copied" in text)) return
+                // Toasts queue up: an app's own "Message copied" can show up
+                // seconds after Android's "Copied" for the same copy.
+                if (SystemClock.uptimeMillis() - lastGrabAt < 10_000) return
+                handler.postDelayed({ grabClipboard(null) }, 100)
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
                 if (e.packageName == "com.android.systemui") readClipboardPreview()
@@ -363,7 +367,12 @@ class IslandService : AccessibilityService(),
 
     private fun onCopied(text: String) {
         val now = SystemClock.uptimeMillis()
-        if (text == lastCopied && now - lastCopiedAt < 4000) return // the same copy, seen twice
+        if (DEBUG_COPY) android.util.Log.i(
+            "IslandCopy", "onCopied len=${text.length} same=${text == lastCopied} dt=${now - lastCopiedAt} from=" +
+                Throwable().stackTrace.getOrNull(1)?.methodName,
+        )
+        // the clipboard still holds what we last showed: it's the same copy, seen again
+        if (text == lastCopied && now - lastCopiedAt < 30_000) return
         lastCopied = text
         lastCopiedAt = now
         val c = suggestions.forCopied(text) ?: return
@@ -371,6 +380,7 @@ class IslandService : AccessibilityService(),
     }
 
     private fun showCard(c: Card) {
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "showCard ${c.kind}")
         card = c
         mediaExpanded = false
         handler.removeCallbacks(clearCard)
