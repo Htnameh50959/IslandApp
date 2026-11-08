@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="88dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="56dp">
+
+        <TextView style="@style/Title" android:text="@string/app_name" />
+        <TextView style="@style/Body" android:text="@string/tagline" />
+
+        <!-- ───────── Setup ───────── -->
+        <TextView style="@style/Section" android:text="Setup" />
+        <LinearLayout style="@style/Card">
+
+            <LinearLayout style="@style/Row">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView style="@style/RowTitle" android:text="1 · Show the island" />
+                    <TextView android:id="@+id/statusA11y" style="@style/RowSub" />
+                </LinearLayout>
+                <Button android:id="@+id/btnA11y" style="@style/PillButton" android:text="Enable" />
+            </LinearLayout>
+
+            <View style="@style/Divider" />
+
+            <LinearLayout style="@style/Row">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView style="@style/RowTitle" android:text="2 · Notifications &amp; music" />
+                    <TextView android:id="@+id/statusNotif" style="@style/RowSub" />
+                </LinearLayout>
+                <Button android:id="@+id/btnNotif" style="@style/PillButton" android:text="Enable" />
+            </LinearLayout>
+
+            <View style="@style/Divider" />
+            <TextView style="@style/Hint" android:text="@string/restricted_hint" />
+        </LinearLayout>
+
+        <!-- ───────── Appearance ───────── -->
+        <TextView style="@style/Section" android:text="Fit it to your camera" />
+        <LinearLayout style="@style/Card">
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Width" />
+                <TextView android:id="@+id/valWidth" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekWidth" style="@style/Seek" />
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Height" />
+                <TextView android:id="@+id/valHeight" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekHeight" style="@style/Seek" />
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Distance from top" />
+                <TextView android:id="@+id/valY" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekY" style="@style/Seek" />
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Horizontal shift" />
+                <TextView android:id="@+id/valX" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekX" style="@style/Seek" />
+        </LinearLayout>
+
+        <!-- ───────── Features ───────── -->
+        <TextView style="@style/Section" android:text="Features" />
+        <LinearLayout style="@style/Card">
+            <Switch android:id="@+id/swEnabled" style="@style/SwitchRow" android:text="Island enabled" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swIdle" style="@style/SwitchRow" android:text="Show pill when idle" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swNotif" style="@style/SwitchRow" android:text="Pop-out notifications" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swMedia" style="@style/SwitchRow" android:text="Now playing &amp; controls" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swCharging" style="@style/SwitchRow" android:text="Charging indicator" />
+            <View style="@style/Divider" />
+            <Switch android:id="@+id/swLandscape" style="@style/SwitchRow" android:text="Hide in landscape" />
+        </LinearLayout>
+
+        <!-- ───────── Try it ───────── -->
+        <TextView style="@style/Section" android:text="Try it" />
+        <Button android:id="@+id/btnPreview" style="@style/WideButton" android:text="Preview a pop-out" />
+        <Button android:id="@+id/btnTest" style="@style/WideButton.Secondary" android:text="Send a real test notification" />
+        <Button android:id="@+id/btnReset" style="@style/WideButton.Secondary" android:text="Reset to defaults" />
+
+        <TextView
+            style="@style/Hint"
+            android:layout_marginTop="18dp"
+            android:gravity="center"
+            android:text="Tap the island to expand · Long-press for music · Swipe up to dismiss" />
+    </LinearLayout>
+</ScrollView>
