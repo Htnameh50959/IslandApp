@@ -10,11 +10,15 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.hardware.display.DisplayManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.DisplayMetrics
+import android.view.Display
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -28,6 +32,7 @@ import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
 import android.view.WindowManager.LayoutParams.WRAP_CONTENT
 import android.view.accessibility.AccessibilityEvent
 import com.staad.island.IslandView.Mode
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -95,6 +100,7 @@ class IslandService : AccessibilityService(),
                 FLAG_WATCH_OUTSIDE_TOUCH or FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
+            // centred on the anchor (camera); applyPosition() sets x/y
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             title = "Island"
             layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) {
@@ -130,6 +136,7 @@ class IslandService : AccessibilityService(),
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        applyPosition() // rotation moves the camera
         render()
     }
 
@@ -214,7 +221,7 @@ class IslandService : AccessibilityService(),
         val visible = cfg.enabled && !(landscape && cfg.hideLandscape)
         v.visibility = if (visible) View.VISIBLE else View.GONE
         // A hidden idle pill must not swallow taps on the status bar beneath it.
-        val touchable = visible && !(v.mode == Mode.IDLE && !cfg.showIdle)
+        val touchable = visible && !v.idleHidden
         val flags = if (touchable) lp.flags and FLAG_NOT_TOUCHABLE.inv() else lp.flags or FLAG_NOT_TOUCHABLE
         if (flags != lp.flags) {
             lp.flags = flags
@@ -222,12 +229,76 @@ class IslandService : AccessibilityService(),
         }
     }
 
+    /**
+     * Put the island on the camera. Phones differ:
+     *  - punch-hole camera near the top centre → the island hugs the hole
+     *    and grows out of it
+     *  - notch (wide cut-out) at the top centre → the island covers the notch
+     *  - no cut-out, or a camera in a corner → the island sits at the top
+     *    centre of the status bar and disappears when idle
+     * The X/Y sliders then nudge it from there.
+     */
     private fun applyPosition(update: Boolean = true) {
         val lp = params ?: return
+        val v = island ?: return
         val d = resources.displayMetrics.density
-        lp.x = (cfg.offsetXDp * d).roundToInt()
-        lp.y = (cfg.offsetYDp * d).roundToInt()
+        val screen = screenSize()
+        val statusBar = statusBarHeight()
+        val compactH = (cfg.heightDp * d).roundToInt()
+
+        var anchorX = screen.x / 2
+        var anchorY = statusBar / 2
+        var holeW = 0
+        var holeH = 0
+        val cut = if (cfg.fitCamera) topCutout(screen.x) else null
+        if (cut != null) {
+            anchorX = cut.centerX()
+            if (cut.width() <= cut.height() * 1.3f) {
+                // punch hole: the cut-out band is often taller than the hole
+                // itself, so use a circle as wide as the band
+                holeW = cut.width()
+                holeH = cut.width()
+                anchorY = cut.centerY()
+            } else {
+                holeW = cut.width()
+                holeH = cut.height()
+                anchorY = cut.centerY()
+            }
+        }
+        // the compact pill must be a bit taller than the camera it wraps
+        val pillH = maxOf(compactH, holeH + (8 * d).roundToInt())
+        val centreX = anchorX + (cfg.offsetXDp * d).roundToInt()
+        v.geometry = IslandView.Geometry(holeW, holeH, pillH, centreX, screen.x)
+        lp.x = anchorX - screen.x / 2 + (cfg.offsetXDp * d).roundToInt()
+        lp.y = maxOf(0, anchorY - pillH / 2) + (cfg.offsetYDp * d).roundToInt()
         if (update) updateWindow()
+    }
+
+    private fun display(): Display? =
+        getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+
+    @Suppress("DEPRECATION")
+    private fun screenSize(): android.graphics.Point {
+        val dm = DisplayMetrics()
+        display()?.getRealMetrics(dm) ?: return android.graphics.Point(
+            resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels,
+        )
+        return android.graphics.Point(dm.widthPixels, dm.heightPixels)
+    }
+
+    private fun statusBarHeight(): Int {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else (24 * resources.displayMetrics.density).roundToInt()
+    }
+
+    /** The camera cut-out at the top of the screen, if it's roughly centred. */
+    private fun topCutout(screenW: Int): Rect? {
+        if (Build.VERSION.SDK_INT < 29) return null
+        val r = display()?.cutout?.boundingRectTop ?: return null
+        if (r.isEmpty) return null
+        val centred = abs(r.centerX() - screenW / 2) < screenW * 0.15f
+        val notTooWide = r.width() < screenW * 0.6f
+        return if (centred && notTooWide) r else null
     }
 
     private fun updateWindow() {

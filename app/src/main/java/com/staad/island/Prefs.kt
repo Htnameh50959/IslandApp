@@ -14,6 +14,7 @@ object Prefs {
     const val MEDIA = "media"
     const val CHARGING = "charging"
     const val HIDE_LANDSCAPE = "hide_landscape"
+    const val FIT_CAMERA = "fit_camera"
 
     fun get(ctx: Context): SharedPreferences = ctx.getSharedPreferences("island", Context.MODE_PRIVATE)
 }
@@ -23,12 +24,14 @@ data class IslandConfig(
     val showIdle: Boolean = true,
     val widthDp: Int = 110,
     val heightDp: Int = 32,
-    val offsetYDp: Int = 10,
+    val offsetYDp: Int = 0,
     val offsetXDp: Int = 0,
     val notifications: Boolean = true,
     val media: Boolean = true,
     val charging: Boolean = true,
     val hideLandscape: Boolean = true,
+    /** Find the camera cut-out and grow the island out of it. */
+    val fitCamera: Boolean = true,
 ) {
     companion object {
         val DEFAULT = IslandConfig()
@@ -47,6 +50,7 @@ data class IslandConfig(
                 media = p.getBoolean(Prefs.MEDIA, d.media),
                 charging = p.getBoolean(Prefs.CHARGING, d.charging),
                 hideLandscape = p.getBoolean(Prefs.HIDE_LANDSCAPE, d.hideLandscape),
+                fitCamera = p.getBoolean(Prefs.FIT_CAMERA, d.fitCamera),
             )
         }
     }

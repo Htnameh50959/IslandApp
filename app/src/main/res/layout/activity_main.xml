@@ -53,8 +53,12 @@
         <TextView style="@style/Section" android:text="Fit it to your camera" />
         <LinearLayout style="@style/Card">
 
+            <Switch android:id="@+id/swFit" style="@style/SwitchRow" android:text="Find my camera automatically" />
+            <TextView android:id="@+id/fitInfo" style="@style/RowSub" android:paddingBottom="8dp" />
+            <View style="@style/Divider" />
+
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Width" />
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Width when there\u2019s no camera" />
                 <TextView android:id="@+id/valWidth" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekWidth" style="@style/Seek" />
@@ -66,13 +70,13 @@
             <SeekBar android:id="@+id/seekHeight" style="@style/Seek" />
 
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Distance from top" />
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move up or down" />
                 <TextView android:id="@+id/valY" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekY" style="@style/Seek" />
 
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Horizontal shift" />
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move left or right" />
                 <TextView android:id="@+id/valX" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekX" style="@style/Seek" />

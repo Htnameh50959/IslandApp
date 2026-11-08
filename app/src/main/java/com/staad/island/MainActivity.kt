@@ -36,7 +36,7 @@ class MainActivity : Activity() {
 
         bindSeek(R.id.seekWidth, R.id.valWidth, Prefs.WIDTH, 60, 300, d.widthDp)
         bindSeek(R.id.seekHeight, R.id.valHeight, Prefs.HEIGHT, 20, 64, d.heightDp)
-        bindSeek(R.id.seekY, R.id.valY, Prefs.OFFSET_Y, 0, 120, d.offsetYDp)
+        bindSeek(R.id.seekY, R.id.valY, Prefs.OFFSET_Y, -40, 120, d.offsetYDp)
         bindSeek(R.id.seekX, R.id.valX, Prefs.OFFSET_X, -150, 150, d.offsetXDp)
 
         bindSwitch(R.id.swEnabled, Prefs.ENABLED, d.enabled)
@@ -45,6 +45,8 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swMedia, Prefs.MEDIA, d.media)
         bindSwitch(R.id.swCharging, Prefs.CHARGING, d.charging)
         bindSwitch(R.id.swLandscape, Prefs.HIDE_LANDSCAPE, d.hideLandscape)
+        bindSwitch(R.id.swFit, Prefs.FIT_CAMERA, d.fitCamera)
+        findViewById<TextView>(R.id.fitInfo).text = cameraInfo()
 
         findViewById<Button>(R.id.btnA11y).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -78,6 +80,19 @@ class MainActivity : Activity() {
             text = if (on) "Manage" else "Enable"
             setBackgroundResource(if (on) R.drawable.btn_secondary else R.drawable.btn_primary)
         }
+    }
+
+    /** Tell the user what we found, so they know whether to nudge the sliders. */
+    @Suppress("DEPRECATION")
+    private fun cameraInfo(): String {
+        val cut = if (Build.VERSION.SDK_INT >= 29) windowManager.defaultDisplay.cutout?.boundingRectTop else null
+        if (cut == null || cut.isEmpty) {
+            return "No camera cut-out on this phone. The island appears from the top of the screen and hides when idle."
+        }
+        val d = resources.displayMetrics.density
+        val kind = if (cut.width() <= cut.height() * 1.3f) "Punch-hole camera" else "Notch"
+        return "$kind found (${(cut.width() / d).toInt()} × ${(cut.height() / d).toInt()} dp). " +
+            "The island grows out of it. Use the sliders below if it’s slightly off."
     }
 
     private fun isAccessibilityEnabled(): Boolean {
