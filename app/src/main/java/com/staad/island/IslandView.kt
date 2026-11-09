@@ -818,9 +818,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.visibility = GONE
         compactBars.playing = false
         mediaBars.playing = false
-        compactText.visibility = VISIBLE
-        compactText.text = if (hotspotClients > 0) hotspotClients.toString() else "Hotspot"
-        compactText.setTextColor(green)
+        compactText.visibility = GONE
         val stripW = applyStrip(compactStrip, mainHotspot = true, mainCharge = false)
         setGlow(green)
         setShown(true)
