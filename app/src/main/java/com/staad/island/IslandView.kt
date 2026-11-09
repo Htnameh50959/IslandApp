@@ -596,7 +596,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             }
             else -> morph(compactH().coerceAtLeast(dp(6)), dp(6), dp(3).toFloat(), null)
         }
-        setShown(true) // always keep a small idle pill so the island stays reachable after events clear
+        setShown(idleVisible()) // hides automatically when nothing is active; events re-open it
     }
 
     fun showCompactVideo(m: MediaState) {
