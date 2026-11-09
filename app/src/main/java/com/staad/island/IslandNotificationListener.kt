@@ -189,12 +189,14 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private fun classifyLive(n: Notification, pkg: String, ongoing: Boolean): LiveKind {
-        when (n.category) {
-            Notification.CATEGORY_CALL -> return LiveKind.CALL
-            Notification.CATEGORY_NAVIGATION -> return LiveKind.NAVIGATION
-            Notification.CATEGORY_ALARM -> return LiveKind.TIMER
-        }
         val chronometer = n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)
+        // Only treat as a live activity when it's genuinely ongoing — a missed-call
+        // or one-shot alert with CATEGORY_CALL should not stick as a live pill.
+        when (n.category) {
+            Notification.CATEGORY_CALL -> if (ongoing) return LiveKind.CALL
+            Notification.CATEGORY_NAVIGATION -> if (ongoing) return LiveKind.NAVIGATION
+            Notification.CATEGORY_ALARM -> if (ongoing || chronometer) return LiveKind.TIMER
+        }
         // Package / text heuristics only for ongoing or chronometer cards — missed-call
         // toasts and one-shot alerts should not stick forever on the island.
         if (!ongoing && !chronometer) return LiveKind.NONE

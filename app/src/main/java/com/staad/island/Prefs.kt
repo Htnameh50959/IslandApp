@@ -6,10 +6,6 @@ import android.content.SharedPreferences
 object Prefs {
     const val ENABLED = "enabled"
     const val SHOW_IDLE = "show_idle"
-    const val WIDTH = "width"
-    const val HEIGHT = "height"
-    const val HOLE_GAP = "hole_gap"
-    const val NOTIF_GAP = "notif_gap"
     const val OFFSET_Y = "offset_y"
     const val OFFSET_X = "offset_x"
     const val NOTIFICATIONS = "notifications"
@@ -35,13 +31,7 @@ object Prefs {
 
 data class IslandConfig(
     val enabled: Boolean = true,
-    val showIdle: Boolean = true,
-    val widthDp: Int = 0,
-    val heightDp: Int = 32,
-    /** Extra space between the camera hole and island content (each side). */
-    val holeGapDp: Int = 0,
-    /** Extra space under the camera hole inside notifications. */
-    val notifGapDp: Int = 8,
+    val showIdle: Boolean = false,
     val offsetYDp: Int = 0,
     val offsetXDp: Int = 0,
     val notifications: Boolean = true,
@@ -78,10 +68,6 @@ data class IslandConfig(
             return IslandConfig(
                 enabled = p.getBoolean(Prefs.ENABLED, d.enabled),
                 showIdle = p.getBoolean(Prefs.SHOW_IDLE, d.showIdle),
-                widthDp = p.getInt(Prefs.WIDTH, d.widthDp),
-                heightDp = p.getInt(Prefs.HEIGHT, d.heightDp),
-                holeGapDp = p.getInt(Prefs.HOLE_GAP, d.holeGapDp),
-                notifGapDp = p.getInt(Prefs.NOTIF_GAP, d.notifGapDp),
                 offsetYDp = p.getInt(Prefs.OFFSET_Y, d.offsetYDp),
                 offsetXDp = p.getInt(Prefs.OFFSET_X, d.offsetXDp),
                 notifications = p.getBoolean(Prefs.NOTIFICATIONS, d.notifications),

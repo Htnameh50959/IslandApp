@@ -63,45 +63,13 @@
             <TextView style="@style/Hint" android:text="@string/restricted_hint" />
         </LinearLayout>
 
-        <!-- ───────── Island size ───────── -->
-        <TextView style="@style/Section" android:text="Edit island size" />
+        <!-- ───────── Camera & position ───────── -->
+        <TextView style="@style/Section" android:text="Camera &amp; position" />
         <LinearLayout style="@style/Card">
 
             <Switch android:id="@+id/swFit" style="@style/SwitchRow" android:text="Find my camera automatically" />
             <TextView android:id="@+id/fitInfo" style="@style/RowSub" android:paddingBottom="8dp" />
             <View style="@style/Divider" />
-
-            <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Island width" />
-                <TextView android:id="@+id/valWidth" style="@style/RowValue" />
-            </LinearLayout>
-            <SeekBar android:id="@+id/seekWidth" style="@style/Seek" />
-            <TextView style="@style/RowSub" android:paddingBottom="8dp"
-                android:text="Starts at 0 dp. Extra width beyond the camera hole — drag up to grow the island." />
-
-            <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Island height" />
-                <TextView android:id="@+id/valHeight" style="@style/RowValue" />
-            </LinearLayout>
-            <SeekBar android:id="@+id/seekHeight" style="@style/Seek" />
-            <TextView style="@style/RowSub" android:paddingBottom="8dp"
-                android:text="How tall the pill is. Never smaller than the camera hole." />
-
-            <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Gap around camera" />
-                <TextView android:id="@+id/valHoleGap" style="@style/RowValue" />
-            </LinearLayout>
-            <SeekBar android:id="@+id/seekHoleGap" style="@style/Seek" />
-            <TextView style="@style/RowSub" android:paddingBottom="8dp"
-                android:text="Starts at 0 dp. Space between the camera hole and the content on each side." />
-
-            <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Notification gap" />
-                <TextView android:id="@+id/valNotifGap" style="@style/RowValue" />
-            </LinearLayout>
-            <SeekBar android:id="@+id/seekNotifGap" style="@style/Seek" />
-            <TextView style="@style/RowSub" android:paddingBottom="8dp"
-                android:text="Extra space under the camera hole inside notifications." />
 
             <LinearLayout style="@style/Row">
                 <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move up or down" />

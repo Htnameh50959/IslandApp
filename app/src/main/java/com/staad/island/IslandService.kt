@@ -74,12 +74,17 @@ class IslandService : AccessibilityService(),
     private var media: MediaState? = null
     private var notif: NotifEvent? = null
     private var notifShownAt = 0L
+    // Recent notification keys already shown, to suppress re-delivered duplicates.
+    private val lastShown = HashMap<String, Long>()
     private var charge: Pair<Int, Boolean>? = null
     private var mediaExpanded = false
     private var receiverRegistered = false
 
     private class Status(val icon: Int, val tint: Int, val title: String, val value: String, val valueColor: Int)
     private var status: Status? = null
+    private var statusExpanded = false
+    private var liveExpanded = false
+    private var notificationExpanded = false
     private var card: Card? = null
     private var dropActive = false
     private var dropHover = false
@@ -493,6 +498,7 @@ class IslandService : AccessibilityService(),
 
     private fun showStatus(st: Status, holdMs: Long = 2400) {
         status = st
+        statusExpanded = false
         handler.removeCallbacks(clearStatus)
         handler.postDelayed(clearStatus, holdMs)
         render()
@@ -649,16 +655,28 @@ class IslandService : AccessibilityService(),
     override fun onNotification(event: NotifEvent) {
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "notification from ${event.packageName}")
         if (!cfg.notifications) return
+        // Some systems re-deliver the same notification; ignore repeats within 2s.
+        val now = SystemClock.uptimeMillis()
+        lastShown[event.key]?.let { shownAt ->
+            if (now - shownAt < 2000) return
+        }
+        lastShown[event.key] = now
+        if (lastShown.size > 100) lastShown.clear()
         notif = event
-        notifShownAt = SystemClock.uptimeMillis()
+        notificationExpanded = false
+        liveExpanded = false
+        notifShownAt = now
         mediaExpanded = false
         handler.removeCallbacks(clearNotif)
-        // Ongoing call, navigation and timer cards remain until their source removes them.
-        if (!event.isLiveActivity) handler.postDelayed(clearNotif, 4500)
+        // Sticky live activities (calls, timers, navigation) close automatically too,
+        // same as ordinary notifications.
+        val holdMs = 4500L
+        handler.postDelayed(clearNotif, holdMs)
         render()
     }
 
     override fun onNotificationRemoved(key: String) {
+        lastShown.remove(key)
         if (notif?.key == key) {
             handler.removeCallbacks(clearNotif)
             notif = null
@@ -702,6 +720,20 @@ class IslandService : AccessibilityService(),
         when {
             dropActive -> v.showDropTarget(dropHover)
             k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
+            n != null && notificationExpanded -> v.showActions(
+                R.drawable.ic_bolt, BLUE, n.title.ifBlank { "Notification" },
+                n.text.ifBlank { n.title }, emptyList(),
+            )
+            n != null && n.isLiveActivity && liveExpanded -> v.showActions(
+                when (n.liveKind) {
+                    LiveKind.CALL -> R.drawable.ic_phone
+                    LiveKind.TIMER -> R.drawable.ic_timer
+                    LiveKind.NAVIGATION -> R.drawable.ic_nav
+                    else -> R.drawable.ic_bolt
+                },
+                BLUE, n.title.ifBlank { "Live activity" }, n.text.ifBlank { n.title }, emptyList(),
+            )
+            st != null && statusExpanded -> v.showActions(st.icon, st.tint, st.title, st.value, emptyList())
             n != null && n.isLiveActivity -> v.showLiveActivity(n.liveKind, n.title, n.text)
             n != null -> v.showNotification(n.icon, n.title, n.text)
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked")
@@ -771,7 +803,8 @@ class IslandService : AccessibilityService(),
         val d = resources.displayMetrics.density
         val screen = screenSize()
         val statusBar = statusBarHeight()
-        val compactH = (cfg.heightDp * d).roundToInt()
+        // The camera cut-out determines the compact pill; events grow from it.
+        val compactH = (32 * d).roundToInt()
 
         var anchorX = screen.x / 2
         var anchorY = statusBar / 2
@@ -846,16 +879,35 @@ class IslandService : AccessibilityService(),
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "tap")
         val v = island ?: return
         when (v.mode) {
-            Mode.NOTIFICATION, Mode.LIVE -> notif?.let { openNotification(it) }
-            // tapping the card itself (not one of its buttons) closes it
-            Mode.ACTIONS -> {
-                handler.removeCallbacks(clearCard)
-                card = null
+            Mode.NOTIFICATION -> {
+                notificationExpanded = !notificationExpanded
                 render()
             }
+            Mode.LIVE -> {
+                if (notif?.isLiveActivity == true) {
+                    liveExpanded = !liveExpanded
+                    render()
+                } else notif?.let { openNotification(it) }
+            }
+            // Event detail cards toggle back to their compact pill on tap.
+            Mode.ACTIONS -> {
+                if (notificationExpanded) {
+                    notificationExpanded = false
+                    render()
+                } else if (liveExpanded) {
+                    liveExpanded = false
+                    render()
+                } else if (statusExpanded) {
+                    statusExpanded = false
+                    render()
+                } else {
+                    handler.removeCallbacks(clearCard)
+                    card = null
+                    render()
+                }
+            }
             Mode.STATUS -> {
-                handler.removeCallbacks(clearStatus)
-                status = null
+                statusExpanded = !statusExpanded
                 render()
             }
             Mode.HOTSPOT -> {

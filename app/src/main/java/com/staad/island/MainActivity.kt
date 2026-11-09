@@ -34,10 +34,6 @@ class MainActivity : Activity() {
         prefs = Prefs.get(this)
         val d = IslandConfig.DEFAULT
 
-        bindSeek(R.id.seekWidth, R.id.valWidth, Prefs.WIDTH, 0, 300, d.widthDp)
-        bindSeek(R.id.seekHeight, R.id.valHeight, Prefs.HEIGHT, 0, 64, d.heightDp)
-        bindSeek(R.id.seekHoleGap, R.id.valHoleGap, Prefs.HOLE_GAP, 0, 80, d.holeGapDp)
-        bindSeek(R.id.seekNotifGap, R.id.valNotifGap, Prefs.NOTIF_GAP, 0, 60, d.notifGapDp)
         bindSeek(R.id.seekY, R.id.valY, Prefs.OFFSET_Y, -40, 120, d.offsetYDp)
         bindSeek(R.id.seekX, R.id.valX, Prefs.OFFSET_X, -150, 150, d.offsetXDp)
 

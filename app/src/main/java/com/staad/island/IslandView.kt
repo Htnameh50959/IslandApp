@@ -278,9 +278,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         imageTintList = ColorStateList.valueOf(Color.WHITE)
     }
     private val faceLayer = FrameLayout(context).apply {
-        addView(faceGlyph, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            bottomMargin = dp(10)
-        })
+        addView(faceGlyph, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
     }
     private var faceAnim: ValueAnimator? = null
 
@@ -330,7 +328,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         setPadding(pad, pad, pad, pad)
     }
     private val actionKind = label(11.5f, grey, bold = true).apply { letterSpacing = 0.06f }
-    private val actionText = label(15f, Color.WHITE, bold = true)
+    private val actionText = label(15f, Color.WHITE, bold = true).apply {
+        maxLines = 5
+        setLineSpacing(dp(2).toFloat(), 1f)
+    }
     private val actionRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -754,14 +755,20 @@ class IslandView(context: Context) : FrameLayout(context) {
         mediaBars.playing = false
         // Every indicator pill (timer, charging, earbuds, hotspot…) is the same
         // compact size as the music pill, so nothing looks bigger than music.
-        val w = compactWidth()
-        val h = compactH()
+        val titleWidth = statusTitle.paint.measureText(title).toInt() + dp(4)
+        val valueWidth = statusValue.paint.measureText(value).toInt() + dp(4)
+        val gapWidth = statusGapWidth()
         val stripW = applyStrip(statusStrip, mainHotspot = false, mainCharge = false)
-        sizeLayer(statusLayer, w + stripW, h)
-        val side = (w - dp(28) - statusGapWidth()).coerceAtLeast(0) / 2
-        (statusTitle.layoutParams as LinearLayout.LayoutParams).width = side - dp(28)
-        (statusGap.layoutParams as LinearLayout.LayoutParams).width = statusGapWidth()
-        (statusValue.layoutParams as LinearLayout.LayoutParams).width = side
+        // The status icon is centered over the camera. Keep both text fields
+        // outside the complete camera footprint so neither label crosses it.
+        val centerGap = max(gapWidth, dp(72))
+        val fixed = dp(12 + 20 + 8 + 16) + centerGap + stripW
+        val w = min(expandedWidth(), max(compactWidth(), fixed + titleWidth + valueWidth))
+        val h = compactH()
+        sizeLayer(statusLayer, w, h)
+        (statusTitle.layoutParams as LinearLayout.LayoutParams).width = titleWidth
+        (statusGap.layoutParams as LinearLayout.LayoutParams).width = centerGap
+        (statusValue.layoutParams as LinearLayout.LayoutParams).width = valueWidth
         statusLayer.requestLayout()
         val fill = {
             statusIcon.setImageResource(icon)
@@ -784,7 +791,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     fun showNotification(icon: Drawable?, title: String, text: String) {
         val replacing = mode == Mode.NOTIFICATION
         mode = Mode.NOTIFICATION
-        val clear = cameraClearance() + dp(cfg.notifGapDp.coerceAtLeast(0))
+        val clear = cameraClearance()
         val w = expandedWidth()
         val h = dp(84) + clear
         notifLayer.setPadding(dp(16), clear, dp(26), dp(12))
@@ -833,8 +840,12 @@ class IslandView(context: Context) : FrameLayout(context) {
         mediaBars.playing = false
         val clear = cameraClearance()
         val w = expandedWidth()
-        val h = dp(158) + clear
+        val detailLines = text.length.coerceAtMost(240).let { ((it + 37) / 38).coerceIn(1, 5) }
+        val hasActions = actions.isNotEmpty()
+        val contentHeight = dp(38 + 18 + detailLines * 20 + if (hasActions) 58 else 0)
+        val h = contentHeight + clear + dp(26)
         actionLayer.setPadding(dp(20), clear + dp(14), dp(20), dp(12))
+        actionRow.visibility = if (hasActions) VISIBLE else GONE
         sizeLayer(actionLayer, w, h)
         val fill = {
             actionBadge.setImageResource(badge)
@@ -901,9 +912,10 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     // ── Internals ───────────────────────────────────────────────────────────
 
-    private fun idleVisible() = cfg.showIdle && (geometry.holeW > 0 || !cfg.fitCamera)
+    private fun idleVisible() = false
 
-    private fun compactH() = max(dp(cfg.heightDp), geometry.compactH)
+    // Base size comes from the detected camera; it is never user-configured.
+    private fun compactH() = geometry.compactH.coerceAtLeast(dp(32))
 
     /**
      * Space reserved at the top of expanded pills so content sits under the
@@ -911,8 +923,10 @@ class IslandView(context: Context) : FrameLayout(context) {
      */
     private fun cameraClearance(): Int {
         if (geometry.holeW <= 0) return dp(6)
-        // Keep content below the hole; a little extra so text clears the lens.
-        return max(geometry.holeH, compactH()) / 2 + dp(10)
+        // Keep expanded content below the entire camera / compact-pill area.
+        // A number of phones report a cut-out smaller than the visible camera
+        // band, so half-height clearance still lets text fall behind the lens.
+        return max(geometry.holeH, compactH()) + dp(12)
     }
 
     private fun cornerRadius() = min(sr.value * sPress.value, rect.height() / 2f)
@@ -960,16 +974,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactLayer.setPadding(dp(5), 0, dp(14), 0)
     }
 
-    // Art and bars sit either side of the camera. Width is extra beyond the
-    // hole (starts at 0 = just the hole). Gap is padding on each side.
-    private fun holePad() = dp(cfg.holeGapDp.coerceAtLeast(0))
-
-    /** Horizontal span reserved for the camera hole + user width/gap. */
-    private fun centerSpan(): Int {
-        val extra = dp(cfg.widthDp.coerceAtLeast(0))
-        return if (geometry.holeW > 0) geometry.holeW + 2 * holePad() + extra
-        else extra
-    }
+    /** Horizontal span reserved for the detected camera and its safe margin. */
+    private fun centerSpan(): Int =
+        if (geometry.holeW > 0) max(geometry.holeW, compactH()) else 0
 
     private fun compactWidth(): Int = centerSpan() + 2 * compactH() + dp(28)
 
