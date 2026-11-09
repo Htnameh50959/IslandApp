@@ -76,6 +76,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onPrev()
         fun onPlayPause()
         fun onNext()
+        /** User dragged the media progress bar: fraction 0..1 of the track. */
+        fun onSeek(fraction: Float)
         /** Where the settled island is (window coordinates), or null when it shouldn't take touches. */
         fun onTouchArea(area: Rect?)
     }
@@ -375,7 +377,9 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val mediaTitle = label(16f, Color.WHITE, bold = true)
     private val mediaArtist = label(14f, grey)
     private val mediaBars = EqualizerView(context)
-    private val mediaProgress = ProgressLine(context)
+    private val mediaProgress = ProgressLine(context).apply {
+        isClickable = true
+    }
     private val mediaElapsed = label(11.5f, grey).apply { fontFeatureSettings = "tnum" }
     private val mediaRemaining = label(11.5f, grey).apply { fontFeatureSettings = "tnum" }
     private val btnPrev = iconButton(R.drawable.ic_prev, 50) { callbacks?.onPrev() }
@@ -592,7 +596,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             }
             else -> morph(compactH().coerceAtLeast(dp(6)), dp(6), dp(3).toFloat(), null)
         }
-        setShown(idleVisible())
+        setShown(true) // always keep a small idle pill so the island stays reachable after events clear
     }
 
     fun showCompactVideo(m: MediaState) {
@@ -748,15 +752,16 @@ class IslandView(context: Context) : FrameLayout(context) {
         mode = target
         compactBars.playing = false
         mediaBars.playing = false
-        val w = statusWidth()
+        // Every indicator pill (timer, charging, earbuds, hotspot…) is the same
+        // compact size as the music pill, so nothing looks bigger than music.
+        val w = compactWidth()
         val h = compactH()
         val stripW = applyStrip(statusStrip, mainHotspot = false, mainCharge = false)
         sizeLayer(statusLayer, w + stripW, h)
-        val side = (w - dp(28) - statusGapWidth()) / 2
+        val side = (w - dp(28) - statusGapWidth()).coerceAtLeast(0) / 2
         (statusTitle.layoutParams as LinearLayout.LayoutParams).width = side - dp(28)
         (statusGap.layoutParams as LinearLayout.LayoutParams).width = statusGapWidth()
         (statusValue.layoutParams as LinearLayout.LayoutParams).width = side
-        applyStrip(statusStrip, mainHotspot = false, mainCharge = false)
         statusLayer.requestLayout()
         val fill = {
             statusIcon.setImageResource(icon)
@@ -773,7 +778,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         } else {
             fill()
         }
-        morph(w, h, h / 2f, statusLayer)
+        morph(w + stripW, h, h / 2f, statusLayer)
     }
 
     fun showNotification(icon: Drawable?, title: String, text: String) {
@@ -873,6 +878,7 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     fun showMedia(m: MediaState) {
         mode = Mode.MEDIA
+        mediaProgress.onSeek = { callbacks?.onSeek(it) }
         val clear = cameraClearance()
         val w = expandedWidth()
         val h = dp(196) + clear

@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
 import kotlin.math.abs
@@ -76,7 +77,7 @@ class EqualizerView(context: Context) : View(context) {
     }
 }
 
-/** Thin rounded progress track. */
+/** Thin rounded progress track. Tapping/dragging seeks the track. */
 class ProgressLine(context: Context) : View(context) {
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
@@ -94,12 +95,30 @@ class ProgressLine(context: Context) : View(context) {
             invalidate()
         }
 
+    /** Callback when the user taps/drags the track, with the new 0..1 fraction. */
+    var onSeek: ((Float) -> Unit)? = null
+
     override fun onDraw(canvas: Canvas) {
         val r = height / 2f
         canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), r, r, track)
         if (fraction > 0f) {
             canvas.drawRoundRect(0f, 0f, max(height.toFloat(), width * fraction), height.toFloat(), r, r, fill)
         }
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                val w = width.toFloat()
+                if (w > 0f) {
+                    val f = (ev.x / w).coerceIn(0f, 1f)
+                    fraction = f
+                    onSeek?.invoke(f)
+                }
+                return true
+            }
+        }
+        return super.onTouchEvent(ev)
     }
 }
 

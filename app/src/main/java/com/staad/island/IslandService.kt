@@ -941,6 +941,15 @@ class IslandService : AccessibilityService(),
         rearmMediaCollapse()
     }
 
+    override fun onSeek(fraction: Float) {
+        val m = media ?: return
+        val dur = m.durationMs
+        if (dur <= 0) return
+        val tc = m.controller?.transportControls ?: return
+        tc.seekTo((dur * fraction).toLong())
+        rearmMediaCollapse()
+    }
+
     private fun expandMedia() {
         island?.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
         mediaExpanded = true
