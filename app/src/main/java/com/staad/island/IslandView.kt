@@ -1053,7 +1053,16 @@ class IslandView(context: Context) : FrameLayout(context) {
     /** Room above the pill so its glow isn't cut off by the top of the window. */
     val glowPad: Int get() = dp(16)
 
-    private fun topFor(h: Float, ch: Float) = max(0f, (ch - h) / 2f)
+    private fun topFor(h: Float, ch: Float): Float {
+        // No camera cut-out: centre the pill on the anchor.
+        if (geometry.holeW <= 0) return max(0f, (ch - h) / 2f)
+        // Compact / shrinking pill: vertically centred so it wraps the camera hole.
+        if (h <= ch) return max(0f, (ch - h) / 2f)
+        // Expanded pill (media / notification / status…): push its top edge just
+        // below the camera hole so nothing is drawn behind the lens, and let it
+        // grow dynamically downward instead of overlapping the cut-out.
+        return (geometry.holeH + geometry.compactH) / 2f + dp(8)
+    }
 
     private fun redraw() {
         val ps = sPress.value

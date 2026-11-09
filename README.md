@@ -23,7 +23,7 @@ Works on Android 9 and newer. Tested on a vivo Y200 (Android 15).
 
 **Music vs video:** apps in a built-in list of video apps (`VIDEO_PACKAGES` in `IslandBus.kt`) get the video pill. Everything else gets the music pill. Android can't tell video from audio, so add an app's package name to that list if it's missing.
 
-**Closing:** swipe the island up, flick it sideways, or tap outside it. Tapping an empty part of a card also closes it.
+**Closing:** swipe the island up, flick it sideways, or tap outside it. Tapping an empty part of a card also closes it. The island always stays as a small idle pill after an event clears, so it never disappears completely.
 
 ### Fits any phone
 
