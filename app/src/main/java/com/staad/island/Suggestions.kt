@@ -29,27 +29,27 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
 
     private val pm: PackageManager = ctx.packageManager
 
-    /** A card for anything copied: links, numbers and emails get their own buttons. */
+    /** Copy & Go: recognise what was copied and offer the right apps. */
     fun forCopied(raw: String): Card? {
         val t = raw.trim()
         if (t.isEmpty()) return null
         return when {
-            isLink(t) -> linkCard(t, "Link copied")
-            isEmail(t) -> emailCard(t, "Email copied")
-            isPhone(t) -> phoneCard(t, "Number copied")
+            isLink(t) -> linkCard(t, "Copy & Go")
+            isEmail(t) -> emailCard(t, "Copy & Go")
+            isPhone(t) -> phoneCard(t, "Copy & Go")
             else -> copiedTextCard(t)
         }
     }
 
-    /** A card for something dropped on the island: always offers at least Share. */
+    /** Drag & Go: drop text, a link or a photo on the island to share or open it. */
     fun forDropped(clip: ClipData?): Card? {
         val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0) ?: return null
         val text = item.text?.toString()?.trim().orEmpty()
         if (text.isNotEmpty()) {
             return when {
-                isLink(text) -> linkCard(text, "Link dropped")
-                isEmail(text) -> emailCard(text, "Email dropped")
-                isPhone(text) -> phoneCard(text, "Number dropped")
+                isLink(text) -> linkCard(text, "Drag & Go")
+                isEmail(text) -> emailCard(text, "Drag & Go")
+                isPhone(text) -> phoneCard(text, "Drag & Go")
                 else -> textCard(text)
             }
         }
@@ -58,10 +58,14 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         val send = Intent(Intent.ACTION_SEND).setType(type)
             .putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val open = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val actions = mutableListOf(chooser("Share", R.drawable.ic_share, send))
+        if (resolves(open)) actions.add(0, app("Open", R.drawable.ic_open, open))
         return Card(
-            R.drawable.ic_share, BLUE, if (type.startsWith("image/")) "Photo dropped" else "File dropped",
-            uri.lastPathSegment ?: "Shared item",
-            listOf(chooser("Share", R.drawable.ic_share, send)),
+            R.drawable.ic_share, BLUE, "Drag & Go",
+            uri.lastPathSegment ?: if (type.startsWith("image/")) "Photo" else "File",
+            actions,
         )
     }
 
@@ -87,7 +91,7 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
                 app("Call", R.drawable.ic_phone, Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))),
                 app("Message", R.drawable.ic_message, Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number"))),
                 app(
-                    "Save", R.drawable.ic_person_add,
+                    "New contact", R.drawable.ic_person_add,
                     Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI)
                         .putExtra(ContactsContract.Intents.Insert.PHONE, number),
                 ),
@@ -100,7 +104,7 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         listOf(
             app("Email", R.drawable.ic_mail, Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$t"))),
             app(
-                "Save", R.drawable.ic_person_add,
+                "New contact", R.drawable.ic_person_add,
                 Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI)
                     .putExtra(ContactsContract.Intents.Insert.EMAIL, t),
             ),
@@ -116,7 +120,7 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         actions += chooser("Share", R.drawable.ic_share, Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t))
         // looks like a password: never put it on screen
         val shown = if (looksSecret(t)) "••••••••" else t.replace(Regex("\\s+"), " ").take(200)
-        return Card(R.drawable.ic_copy, GREY, "Text copied", shown, actions)
+        return Card(R.drawable.ic_copy, GREY, "Copy & Go", shown, actions)
     }
 
     /** One word, 8–64 characters, mixing letters and digits, and not a web address. */
@@ -128,7 +132,7 @@ class Suggestions(private val ctx: Context, private val done: () -> Unit) {
         runCatching { pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null }.getOrDefault(false)
 
     private fun textCard(t: String): Card = Card(
-        R.drawable.ic_share, BLUE, "Text dropped", t.replace(Regex("\\s+"), " "),
+        R.drawable.ic_share, BLUE, "Drag & Go", t.replace(Regex("\\s+"), " "),
         listOf(
             chooser("Share", R.drawable.ic_share, Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t)),
             app("Search", R.drawable.ic_search, Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, t)),

@@ -1,0 +1,17 @@
+<resources>
+    <color name="accent">#0A84FF</color>
+    <color name="bg">#07090F</color>
+    <color name="bg_wash_top">#0C1220</color>
+    <color name="bg_wash_bottom">#05070C</color>
+    <color name="bg_glow_island">#730A84FF</color>
+    <color name="bg_glow_cool">#4022D3EE</color>
+    <color name="bg_glow_warm">#4030D158</color>
+    <color name="text">#F1F5F9</color>
+    <color name="text2">#94A3B8</color>
+    <color name="divider">#24FFFFFF</color>
+    <color name="glass_top">#33FFFFFF</color>
+    <color name="glass_bottom">#14FFFFFF</color>
+    <color name="glass_stroke">#40FFFFFF</color>
+    <color name="glass_sheen">#24FFFFFF</color>
+    <color name="glass_blur_tint">#99000000</color>
+</resources>

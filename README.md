@@ -1,20 +1,27 @@
 # Island for Android
 
-A living pill around your phone's front camera. Notifications, music, earbuds, copied text and more pop out of it, in the spirit of iPhone's Dynamic Island and OriginOS's Origin Island.
+A living pill around your phone's front camera. Notifications, music, earbuds, hotspot devices, copied text and more pop out of it, in the spirit of iPhone's Dynamic Island and OriginOS's Origin Island.
 
 Works on Android 9 and newer. Tested on a vivo Y200 (Android 15).
 
 ## What it does
 
-| When… | The island… |
+| Feature | What it does |
 |---|---|
-| Music is playing | shows album art on one side of the camera and moving bars on the other, with a soft glow in the album's colour. Tap to open a player with a progress bar and controls. |
-| A notification arrives | grows out of the camera with the app icon, title and text. Tap to open it. A newer notification takes over with a little bounce. |
-| You copy something | offers suggestions with the real app icons: **Open / Share** for a link, **Call / Message / Save** for a phone number, **Email / Save** for an email address, **Search / Translate / Share** for other text. Text that looks like a password is shown as dots. |
-| Earbuds or headphones connect | shows their name and battery level. |
-| You switch silent, vibrate or ring, or Do Not Disturb | shows the new mode. |
-| You plug in the charger | shows a green bolt and the battery level. |
-| You drag text, a link or a photo to the top of the screen | becomes a drop target and offers to share it (only from apps that allow dragging between apps, mostly in split screen). |
+| Music playback | Album art and moving bars around the camera, with a soft glow in the album's colour. Tap to open a player with progress and controls. |
+| Videos | When you leave YouTube, Netflix, MX Player, VLC… a wider pill shows the thumbnail, title and play / pause. Tap the right half to play or pause. |
+| Timer & stopwatch | A compact live pill with the running time. Stays until the timer ends. |
+| Navigation | Live maps / navigation status as a compact pill until you arrive. |
+| Call status | Ongoing or ringing calls stay on the island until they finish. |
+| Notifications | Grow out of the camera with the app icon, title and text. Tap to open. Turn on **Stop system banners** to hide dismissible shade banners so they only appear here. |
+| Copy & Go | Recognises copied links, numbers and emails and suggests **Open / Share**, **Call / Message / New contact**, **Email / New contact**, or **Search / Translate / Share**. Passwords are shown as dots. |
+| Drag & Go | Drag text, a link or a photo to the top of the screen to share or open it (from apps that allow dragging between apps, mostly in split screen). |
+| Smart suggestions | Buttons use the real app icons that will handle the content. |
+| Earbuds / silent / DND | Shows earbuds name and battery, and silent / vibrate / ring / Do Not Disturb changes. |
+| Face ID animation | When a locked phone wakes and unlocks, a Face ID-style scan then green check. Animation only — your phone does the real unlock. |
+| Charging | Green bolt and battery level when you plug in. |
+
+**Music vs video:** apps in a built-in list of video apps (`VIDEO_PACKAGES` in `IslandBus.kt`) get the video pill. Everything else gets the music pill. Android can't tell video from audio, so add an app's package name to that list if it's missing.
 
 **Closing:** swipe the island up, flick it sideways, or tap outside it. Tapping an empty part of a card also closes it.
 
@@ -74,9 +81,13 @@ Every feature can be switched on or off in the app.
 
 **The island stops working after a while (vivo, Xiaomi, Oppo, Samsung…).** The phone is closing it to save battery. Go to **Settings → Battery → Island** and allow background activity, with no restrictions.
 
-**Nothing pops out for notifications.** Check that step 2 is green, that **Pop-out notifications** is on, and that Do Not Disturb isn't hiding them.
+**Nothing pops out for notifications.** Check that step 2 is green, that **Pop-out notifications** is on, and that Do Not Disturb isn't hiding them. To hide shade banners and only show them in the Island, turn on **Stop system banners — show notifications in the Island**.
+
+**Calls, timers or navigation don't stick.** Turn on **Live activities: calls, navigation, timer & stopwatch**.
 
 **Copying shows nothing.** Make sure **Copy suggestions** is on. Each time it reads a copy, Android shows a small "Island pasted from your clipboard" note. That's Android's privacy notice and is expected.
+
+**Face ID animation doesn't show.** Check that **Face ID animation when the phone wakes and unlocks** is on (there is a **Preview Face ID** button in the app). It shows when the phone is protected by a lock and the screen turns on. If your phone unlocks before Android reports the screen on, no pill can appear.
 
 **The island isn't lined up with my camera.** Use the **Move up or down** and **Move left or right** sliders, or turn off **Find my camera automatically** and size it yourself.
 
@@ -97,11 +108,11 @@ Every feature can be switched on or off in the app.
 
 | File | Purpose |
 |---|---|
-| `IslandService.kt` | Overlay windows, camera detection, what to show when, gestures, copy detection, status pop-ups, drag and drop |
-| `IslandView.kt` | The island: springs, glow, every view (compact, notification, card, status, player…) |
+| `IslandService.kt` | Overlay windows, camera detection, what to show when, gestures, copy detection, status pop-ups, Face ID, foreground-app tracking, drag and drop |
+| `IslandView.kt` | The island: springs, glow, every view (compact, video, Face ID, notification, card, status, player…) |
 | `IslandNotificationListener.kt` | Notifications and media sessions |
 | `Suggestions.kt` | Copy and drop suggestions |
-| `IslandBus.kt` | Passes events from the listener to the overlay |
+| `IslandBus.kt` | Passes events from the listener to the overlay, and the list of video apps |
 | `MainActivity.kt` | Setup and settings screen |
 | `Prefs.kt` | Settings |
 

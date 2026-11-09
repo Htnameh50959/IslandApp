@@ -5,6 +5,9 @@
     <!-- Earbuds pop-ups: the name and battery of a Bluetooth device that connects. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <!-- Hotspot on / connected-devices pill. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Lets us load icons/labels of apps that post notifications (Android 11+ package visibility). -->
     <queries>

@@ -34,8 +34,10 @@ class MainActivity : Activity() {
         prefs = Prefs.get(this)
         val d = IslandConfig.DEFAULT
 
-        bindSeek(R.id.seekWidth, R.id.valWidth, Prefs.WIDTH, 60, 300, d.widthDp)
-        bindSeek(R.id.seekHeight, R.id.valHeight, Prefs.HEIGHT, 20, 64, d.heightDp)
+        bindSeek(R.id.seekWidth, R.id.valWidth, Prefs.WIDTH, 0, 300, d.widthDp)
+        bindSeek(R.id.seekHeight, R.id.valHeight, Prefs.HEIGHT, 0, 64, d.heightDp)
+        bindSeek(R.id.seekHoleGap, R.id.valHoleGap, Prefs.HOLE_GAP, 0, 80, d.holeGapDp)
+        bindSeek(R.id.seekNotifGap, R.id.valNotifGap, Prefs.NOTIF_GAP, 0, 60, d.notifGapDp)
         bindSeek(R.id.seekY, R.id.valY, Prefs.OFFSET_Y, -40, 120, d.offsetYDp)
         bindSeek(R.id.seekX, R.id.valX, Prefs.OFFSET_X, -150, 150, d.offsetXDp)
 
@@ -47,8 +49,23 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swLandscape, Prefs.HIDE_LANDSCAPE, d.hideLandscape)
         bindSwitch(R.id.swFit, Prefs.FIT_CAMERA, d.fitCamera)
         bindSwitch(R.id.swStatus, Prefs.STATUS, d.statusPopups)
-        bindSwitch(R.id.swCopy, Prefs.COPY, d.copySuggestions)
+        bindSwitch(R.id.swHotspot, Prefs.HOTSPOT, d.hotspotDevices)
         bindSwitch(R.id.swDrop, Prefs.DROP, d.dragDrop)
+        bindSwitch(R.id.swVideo, Prefs.VIDEO, d.videoPill)
+        bindSwitch(R.id.swRouteNotifications, Prefs.ROUTE_NOTIFICATIONS, d.routeNotifications)
+        // Timer, navigation and call status share one live-activities preference.
+        bindLinkedSwitches(
+            intArrayOf(R.id.swLiveActivities, R.id.swNavigation, R.id.swCall),
+            Prefs.LIVE_ACTIVITIES,
+            d.liveActivities,
+        )
+        // Smart suggestions ride with Copy & Go.
+        bindLinkedSwitches(
+            intArrayOf(R.id.swCopy, R.id.swSuggestions),
+            Prefs.COPY,
+            d.copySuggestions,
+        )
+        bindSwitch(R.id.swFaceId, Prefs.FACE_ID, d.faceId)
         bindSwitch(R.id.swGlow, Prefs.GLOW, d.glow)
         findViewById<TextView>(R.id.fitInfo).text = cameraInfo()
 
@@ -66,6 +83,11 @@ class MainActivity : Activity() {
             }
         }
         findViewById<Button>(R.id.btnPreview).setOnClickListener { preview() }
+        findViewById<Button>(R.id.btnFaceId).setOnClickListener {
+            if (!IslandBus.isOverlayRunning) {
+                Toast.makeText(this, "Turn on step 1 first", Toast.LENGTH_SHORT).show()
+            } else IslandBus.postFaceIdPreview()
+        }
         findViewById<Button>(R.id.btnTest).setOnClickListener { sendTestNotification() }
         findViewById<Button>(R.id.btnReset).setOnClickListener {
             prefs.edit().clear().apply()
@@ -128,7 +150,10 @@ class MainActivity : Activity() {
             override fun onProgressChanged(s: SeekBar, progress: Int, fromUser: Boolean) {
                 val v = progress + min
                 value.text = "$v dp"
-                if (fromUser) prefs.edit().putInt(key, v).apply()
+                if (fromUser) {
+                    prefs.edit().putInt(key, v).commit()
+                    IslandBus.reloadPrefs()
+                }
             }
 
             override fun onStartTrackingTouch(s: SeekBar) = Unit
@@ -139,7 +164,33 @@ class MainActivity : Activity() {
     private fun bindSwitch(id: Int, key: String, def: Boolean) {
         findViewById<Switch>(id).apply {
             isChecked = prefs.getBoolean(key, def)
-            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean(key, checked).apply() }
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(key, checked).commit()
+                IslandBus.reloadPrefs()
+            }
+        }
+    }
+
+    /** Several feature rows that share one preference stay visually in sync. */
+    private fun bindLinkedSwitches(ids: IntArray, key: String, def: Boolean) {
+        val switches = ids.map { findViewById<Switch>(it) }
+        fun apply(checked: Boolean, source: Switch?) {
+            prefs.edit().putBoolean(key, checked).commit()
+            IslandBus.reloadPrefs()
+            for (sw in switches) {
+                if (sw === source || sw.isChecked == checked) continue
+                sw.tag = true
+                sw.isChecked = checked
+                sw.tag = null
+            }
+        }
+        val current = prefs.getBoolean(key, def)
+        for (sw in switches) {
+            sw.isChecked = current
+            sw.setOnCheckedChangeListener { button, checked ->
+                if (button.tag == true) return@setOnCheckedChangeListener
+                apply(checked, button as Switch)
+            }
         }
     }
 

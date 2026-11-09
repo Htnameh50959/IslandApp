@@ -9,6 +9,7 @@ import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -79,7 +80,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onTouchArea(area: Rect?)
     }
 
-    enum class Mode { IDLE, COMPACT_MEDIA, CHARGING, STATUS, NOTIFICATION, ACTIONS, DROP, MEDIA }
+    enum class Mode { IDLE, COMPACT_MEDIA, CHARGING, STATUS, LIVE, HOTSPOT, NOTIFICATION, ACTIONS, DROP, MEDIA }
 
     /** Where the camera is, in pixels. holeW/holeH are 0 when there's no usable cutout. */
     data class Geometry(
@@ -118,6 +119,12 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val rect = RectF()
     private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp(1) * 0.8f
+    }
+    private val rimRect = RectF()
     private val glowRect = RectF()
 
     /** Soft light behind the pill, blurred (Android 12+). */
@@ -138,17 +145,119 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val pillView = object : FrameLayout(context) {
         override fun onDraw(canvas: Canvas) {
             val r = cornerRadius()
+            if (rect.height() <= 0f) return
+            // Liquid glass: translucent frosted body, top sheen, bright rim.
+            pillPaint.shader = LinearGradient(
+                0f, rect.top, 0f, rect.bottom,
+                0xC73A3A42.toInt(), 0xEB08080C.toInt(), Shader.TileMode.CLAMP,
+            )
             canvas.drawRoundRect(rect, r, r, pillPaint)
+            sheenPaint.shader = LinearGradient(
+                0f, rect.top, 0f, rect.top + rect.height() * 0.55f,
+                0x38FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP,
+            )
+            canvas.drawRoundRect(rect, r, r, sheenPaint)
+            val sw = rimPaint.strokeWidth / 2f
+            rimRect.set(rect.left + sw, rect.top + sw, rect.right - sw, rect.bottom - sw)
+            rimPaint.shader = LinearGradient(
+                rect.left, rect.top, rect.right, rect.bottom,
+                intArrayOf(0x8CFFFFFF.toInt(), 0x1FFFFFFF, 0x59FFFFFF),
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
+            )
+            canvas.drawRoundRect(rimRect, max(r - sw, 0f), max(r - sw, 0f), rimPaint)
         }
     }
 
+    // ── Indicator strip (hotspot / charging shown inside another pill) ──────
+    // Several events share one pill: whatever is on screen keeps its content
+    // and a small strip on the right shows the other active indicators.
+    private class Strip(
+        val row: LinearLayout,
+        val hotspotIcon: ImageView,
+        val hotspotCount: TextView,
+        val chargeIcon: ImageView,
+        val chargeText: TextView,
+    )
+
+    private fun newStrip(): Strip {
+        val icon = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.ic_hotspot)
+            imageTintList = ColorStateList.valueOf(green)
+        }
+        val count = label(11.5f, green, bold = true).apply { gravity = Gravity.END }
+        val bolt = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.ic_bolt)
+        }
+        val pct = label(11.5f, green, bold = true).apply { gravity = Gravity.END }
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = GONE
+            addView(icon, LinearLayout.LayoutParams(dp(15), dp(15)))
+            addView(count, LinearLayout.LayoutParams(0, WRAP_CONTENT).apply { marginStart = dp(3) })
+            addView(bolt, LinearLayout.LayoutParams(dp(13), dp(13)).apply { marginStart = dp(8) })
+            addView(pct, LinearLayout.LayoutParams(0, WRAP_CONTENT).apply { marginStart = dp(3) })
+        }
+        return Strip(row, icon, count, bolt, pct)
+    }
+
+    /** What else is active; the pill that is showing draws it as a strip. */
+    private var stripHotspot = false
+    private var stripClients = 0
+    private var stripCharge: Pair<Int, Boolean>? = null
+
+    fun setStrip(hotspot: Boolean, clients: Int, charge: Pair<Int, Boolean>?) {
+        stripHotspot = hotspot
+        stripClients = clients
+        stripCharge = charge
+    }
+
+    /**
+     * Shows the strip's contents inside [s] and returns the width it takes.
+     * [mainHotspot] / [mainCharge] mark what the pill itself already shows,
+     * so an indicator is never drawn twice.
+     */
+    private fun applyStrip(s: Strip, mainHotspot: Boolean, mainCharge: Boolean): Int {
+        val hs = stripHotspot && !mainHotspot
+        val showCount = hs && stripClients > 0
+        s.hotspotIcon.visibility = if (hs) VISIBLE else GONE
+        s.hotspotCount.visibility = if (showCount) VISIBLE else GONE
+        s.hotspotCount.text = if (showCount) stripClients.toString() else ""
+        (s.hotspotCount.layoutParams as LinearLayout.LayoutParams).width = if (showCount) dp(16) else 0
+
+        val charge = stripCharge?.takeIf { !mainCharge }
+        val plugged = charge?.second ?: false
+        s.chargeIcon.visibility = if (charge != null) VISIBLE else GONE
+        s.chargeText.visibility = if (charge != null) VISIBLE else GONE
+        val tint = if (plugged) green else Color.WHITE
+        s.chargeIcon.imageTintList = ColorStateList.valueOf(tint)
+        s.chargeText.setTextColor(tint)
+        if (charge != null) s.chargeText.text = "${charge.first}%"
+
+        var w = 0
+        if (hs) w += dp(15 + 3) + if (showCount) dp(16) else 0
+        if (charge != null) w += dp(8 + 13 + 3 + 32)
+        s.row.visibility = if (w > 0) VISIBLE else GONE
+        return if (w > 0) w + dp(8) else 0
+    }
+
     // ── Compact layer (art ◀ camera ▶ bars / charging %) ────────────────────
+    private val compactStrip = newStrip()
     private val compactIcon = ImageView(context).apply {
         scaleType = ImageView.ScaleType.CENTER_CROP
         rounded(7f)
     }
     private val compactBars = EqualizerView(context)
     private val compactText = label(14f, Color.WHITE, bold = true)
+    private val compactPlay = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        imageTintList = ColorStateList.valueOf(Color.WHITE)
+        visibility = GONE
+    }
+    /** True while the compact pill is the video variant (title + play/pause). */
+    private var videoPill = false
     private val compactLayer = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -156,9 +265,25 @@ class IslandView(context: Context) : FrameLayout(context) {
         addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         addView(compactBars, LinearLayout.LayoutParams(dp(20), dp(15)))
         addView(compactText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        addView(compactPlay, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginStart = dp(6) })
+        addView(compactStrip.row, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
     }
 
-    // ── Status layer (icon + name ◀ camera ▶ value) ─────────────────────────
+    // ── Face ID layer (glyph under the camera, like iOS) ────────────────────
+    private val faceGlyph = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setImageResource(R.drawable.ic_face_scan)
+        imageTintList = ColorStateList.valueOf(Color.WHITE)
+    }
+    private val faceLayer = FrameLayout(context).apply {
+        addView(faceGlyph, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = dp(10)
+        })
+    }
+    private var faceAnim: ValueAnimator? = null
+
+    // ── Status layer (icon + name ◀ camera ▶ value · indicators) ────────────
+    private val statusStrip = newStrip()
     private val statusIcon = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
     private val statusTitle = label(13.5f, Color.WHITE, bold = true)
     private val statusGap = View(context)
@@ -171,9 +296,12 @@ class IslandView(context: Context) : FrameLayout(context) {
         addView(statusTitle, LinearLayout.LayoutParams(0, WRAP_CONTENT).apply { marginStart = dp(8) })
         addView(statusGap, LinearLayout.LayoutParams(0, 1))
         addView(statusValue, LinearLayout.LayoutParams(0, WRAP_CONTENT))
+        addView(statusStrip.row, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
     }
 
     // ── Notification layer ──────────────────────────────────────────────────
+    // Top padding clears the camera hole so title/text sit below the notch
+    // (Origin Island style), instead of overlapping it.
     private val notifIcon = ImageView(context).apply {
         scaleType = ImageView.ScaleType.CENTER_CROP
         oval()
@@ -255,6 +383,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val btnNext = iconButton(R.drawable.ic_next, 50) { callbacks?.onNext() }
     private val mediaLayer = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
+        // Top padding is set in showMedia() to clear the camera hole.
         setPadding(dp(22), dp(20), dp(22), dp(12))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -288,7 +417,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         }, LinearLayout.LayoutParams(-1, WRAP_CONTENT).apply { topMargin = dp(4) })
     }
 
-    private val layers = listOf(compactLayer, statusLayer, notifLayer, actionLayer, dropLayer, mediaLayer)
+    private val layers = listOf(
+        compactLayer, faceLayer, statusLayer, notifLayer, actionLayer, dropLayer, mediaLayer,
+    )
     private var currentLayer: View? = null
     private val layerAnims = HashMap<View, ValueAnimator>()
     private val fadeLevel = HashMap<View, Float>()
@@ -370,6 +501,11 @@ class IslandView(context: Context) : FrameLayout(context) {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
+                // video pill: the right half (title + button) toggles play/pause
+                if (mode == Mode.COMPACT_MEDIA && videoPill && e.x > rect.centerX()) {
+                    callbacks?.onPlayPause()
+                    return true
+                }
                 callbacks?.onTap()
                 return true
             }
@@ -443,13 +579,95 @@ class IslandView(context: Context) : FrameLayout(context) {
         setGlow(null)
         val g = geometry
         when {
-            // shrink back into the camera
-            g.holeW > 0 -> morph(g.holeW, g.holeH, g.holeH / 2f, null)
+            // Camera hole: width/gap grow the idle pill out of the hole (0 = exactly the hole).
+            g.holeW > 0 -> {
+                val w = centerSpan().coerceAtLeast(g.holeW)
+                val h = if (w > g.holeW) max(g.holeH, compactH()) else g.holeH
+                morph(w, h, h / 2f, null)
+            }
             // no camera to hide in: keep a pill if wanted, otherwise melt into a dot
-            cfg.showIdle && !cfg.fitCamera -> morph(dp(cfg.widthDp), compactH(), compactH() / 2f, null)
-            else -> morph(compactH(), dp(6), dp(3).toFloat(), null)
+            cfg.showIdle && !cfg.fitCamera -> {
+                val w = centerSpan().coerceAtLeast(dp(6))
+                morph(w, compactH().coerceAtLeast(dp(6)), compactH() / 2f, null)
+            }
+            else -> morph(compactH().coerceAtLeast(dp(6)), dp(6), dp(3).toFloat(), null)
         }
         setShown(idleVisible())
+    }
+
+    fun showCompactVideo(m: MediaState) {
+        mode = Mode.COMPACT_MEDIA
+        prepareCompact()
+        videoPill = true
+        sizeLayer(compactLayer, compactWidth() + dp(110), compactH())
+        compactIcon.setPadding(0, 0, 0, 0)
+        if (m.art != null) {
+            compactIcon.imageTintList = null
+            compactIcon.setImageBitmap(m.art)
+        } else {
+            compactIcon.setImageResource(R.drawable.ic_music)
+            compactIcon.imageTintList = ColorStateList.valueOf(m.accent)
+        }
+        compactBars.visibility = GONE
+        compactText.text = m.title.ifBlank { "Video" }
+        compactText.setTextColor(Color.WHITE)
+        compactText.textSize = 12.5f
+        compactText.maxWidth = dp(96)
+        compactText.maxLines = 1
+        compactText.ellipsize = android.text.TextUtils.TruncateAt.END
+        compactText.visibility = VISIBLE
+        compactPlay.setImageResource(if (m.playing) R.drawable.ic_pause else R.drawable.ic_play)
+        compactPlay.visibility = VISIBLE
+        mediaBars.playing = false
+        setGlow(m.accent, pulsing = m.playing)
+        setShown(true)
+        morph(compactWidth() + dp(110), compactH(), compactH() / 2f, compactLayer)
+    }
+
+    /** iOS-style Face ID: glyph breathes under the camera while scanning, then pops green. */
+    fun showFaceId(unlocked: Boolean) {
+        val wasFace = mode == Mode.STATUS && currentLayer === faceLayer
+        mode = Mode.STATUS
+        compactBars.playing = false
+        mediaBars.playing = false
+        val clear = cameraClearance()
+        val w = max(dp(124), centerSpan() + dp(50))
+        val h = compactH() + dp(46) + max(0, clear - dp(8))
+        sizeLayer(faceLayer, w, h)
+        setShown(true)
+        faceAnim?.cancel()
+        if (!unlocked) {
+            faceGlyph.setImageResource(R.drawable.ic_face_scan)
+            faceGlyph.imageTintList = ColorStateList.valueOf(Color.WHITE)
+            setGlow(Color.WHITE)
+            faceAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 900
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                addUpdateListener {
+                    if (currentLayer !== faceLayer) { cancel(); return@addUpdateListener }
+                    val f = it.animatedValue as Float
+                    faceGlyph.alpha = 0.55f + 0.45f * f
+                    faceGlyph.scaleX = 0.92f + 0.12f * f
+                    faceGlyph.scaleY = 0.92f + 0.12f * f
+                }
+                start()
+            }
+        } else {
+            faceGlyph.setImageResource(R.drawable.ic_face_ok)
+            faceGlyph.imageTintList = ColorStateList.valueOf(green)
+            faceGlyph.alpha = 1f
+            faceGlyph.scaleX = 0.6f; faceGlyph.scaleY = 0.6f
+            faceGlyph.animate().scaleX(1f).scaleY(1f).setDuration(380)
+                .setInterpolator(android.view.animation.OvershootInterpolator(2.6f)).start()
+            setGlow(green)
+            performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        }
+        if (wasFace) {
+            rect.height() // already sized; just keep the morph target
+        }
+        morph(w, h, dp(26).toFloat(), faceLayer)
     }
 
     fun showCompactMedia(m: MediaState) {
@@ -468,9 +686,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.color = m.accent
         compactBars.playing = m.playing
         mediaBars.playing = false
+        val stripW = applyStrip(compactStrip, mainHotspot = false, mainCharge = false)
         setGlow(m.accent, pulsing = m.playing)
         setShown(true)
-        morph(compactWidth(), compactH(), compactH() / 2f, compactLayer)
+        morph(compactWidth() + stripW, compactH(), compactH() / 2f, compactLayer)
     }
 
     fun showCharging(level: Int, plugged: Boolean) {
@@ -486,24 +705,58 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.visibility = GONE
         compactBars.playing = false
         mediaBars.playing = false
+        val stripW = applyStrip(compactStrip, mainHotspot = false, mainCharge = true)
         setGlow(if (plugged) green else null)
         setShown(true)
-        morph(compactWidth(), compactH(), compactH() / 2f, compactLayer)
+        morph(compactWidth() + stripW, compactH(), compactH() / 2f, compactLayer)
     }
 
     /** A short status: name on one side of the camera, value on the other. */
     fun showStatus(icon: Int, tint: Int, title: String, value: String, valueColor: Int) {
-        val replacing = mode == Mode.STATUS
-        mode = Mode.STATUS
+        showStatusLike(Mode.STATUS, icon, tint, title, value, valueColor)
+    }
+
+    /**
+     * Origin Island-style live pill for a call, timer, navigation or other ongoing activity.
+     * Compact like status, but sticky until the source notification ends.
+     */
+    fun showLiveActivity(kind: LiveKind, title: String, text: String) {
+        val (icon, tint, label) = when (kind) {
+            LiveKind.CALL -> Triple(R.drawable.ic_phone, green, "Call")
+            LiveKind.TIMER -> Triple(R.drawable.ic_timer, 0xFFFF9F0A.toInt(), "Timer")
+            LiveKind.NAVIGATION -> Triple(R.drawable.ic_nav, green, "Nav")
+            LiveKind.ACTIVITY, LiveKind.NONE -> Triple(R.drawable.ic_bolt, blue, "Live")
+        }
+        // Prefer the dynamic bit (time / distance / instruction) as the right-hand value.
+        val primary = text.ifBlank { title }.ifBlank { label }
+        val secondary = when {
+            text.isNotBlank() && title.isNotBlank() && title != text -> title.take(18)
+            else -> label
+        }
+        showStatusLike(Mode.LIVE, icon, tint, secondary, primary.take(22), tint)
+    }
+
+    private fun showStatusLike(
+        target: Mode,
+        icon: Int,
+        tint: Int,
+        title: String,
+        value: String,
+        valueColor: Int,
+    ) {
+        val replacing = mode == target || mode == Mode.STATUS || mode == Mode.LIVE
+        mode = target
         compactBars.playing = false
         mediaBars.playing = false
         val w = statusWidth()
         val h = compactH()
-        sizeLayer(statusLayer, w, h)
+        val stripW = applyStrip(statusStrip, mainHotspot = false, mainCharge = false)
+        sizeLayer(statusLayer, w + stripW, h)
         val side = (w - dp(28) - statusGapWidth()) / 2
         (statusTitle.layoutParams as LinearLayout.LayoutParams).width = side - dp(28)
         (statusGap.layoutParams as LinearLayout.LayoutParams).width = statusGapWidth()
         (statusValue.layoutParams as LinearLayout.LayoutParams).width = side
+        applyStrip(statusStrip, mainHotspot = false, mainCharge = false)
         statusLayer.requestLayout()
         val fill = {
             statusIcon.setImageResource(icon)
@@ -526,8 +779,10 @@ class IslandView(context: Context) : FrameLayout(context) {
     fun showNotification(icon: Drawable?, title: String, text: String) {
         val replacing = mode == Mode.NOTIFICATION
         mode = Mode.NOTIFICATION
+        val clear = cameraClearance() + dp(cfg.notifGapDp.coerceAtLeast(0))
         val w = expandedWidth()
-        val h = dp(84)
+        val h = dp(84) + clear
+        notifLayer.setPadding(dp(16), clear, dp(26), dp(12))
         sizeLayer(notifLayer, w, h)
         compactBars.playing = false
         mediaBars.playing = false
@@ -541,7 +796,30 @@ class IslandView(context: Context) : FrameLayout(context) {
         } else {
             fillNotification(icon, title, text)
         }
-        morph(w, h, h / 2f, notifLayer)
+        morph(w, h, dp(28).toFloat(), notifLayer)
+    }
+
+    /**
+     * Sticky compact hotspot pill: green hotspot icon (+ device count) around
+     * the cut-out. Other active indicators (charging…) join as a strip so the
+     * island shows several events at once instead of hiding them.
+     */
+    fun showHotspot(hotspotClients: Int = 0) {
+        mode = Mode.HOTSPOT
+        prepareCompact()
+        compactIcon.setPadding(dp(2), dp(2), dp(2), dp(2))
+        compactIcon.setImageResource(R.drawable.ic_hotspot)
+        compactIcon.imageTintList = ColorStateList.valueOf(green)
+        compactBars.visibility = GONE
+        compactBars.playing = false
+        mediaBars.playing = false
+        compactText.visibility = VISIBLE
+        compactText.text = if (hotspotClients > 0) hotspotClients.toString() else "Hotspot"
+        compactText.setTextColor(green)
+        val stripW = applyStrip(compactStrip, mainHotspot = true, mainCharge = false)
+        setGlow(green)
+        setShown(true)
+        morph(compactWidth() + stripW, compactH(), compactH() / 2f, compactLayer)
     }
 
     /** A card with suggestions, e.g. for a copied link: Open · Share. */
@@ -550,8 +828,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         mode = Mode.ACTIONS
         compactBars.playing = false
         mediaBars.playing = false
+        val clear = cameraClearance()
         val w = expandedWidth()
-        val h = dp(158)
+        val h = dp(158) + clear
+        actionLayer.setPadding(dp(20), clear + dp(14), dp(20), dp(12))
         sizeLayer(actionLayer, w, h)
         val fill = {
             actionBadge.setImageResource(badge)
@@ -580,8 +860,10 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactBars.playing = false
         mediaBars.playing = false
         dropTitle.text = if (hovering) "Let go to share" else "Drop here"
+        val clear = cameraClearance() / 2
         val w = if (hovering) dp(250) else dp(196)
-        val h = if (hovering) dp(64) else dp(52)
+        val h = (if (hovering) dp(64) else dp(52)) + clear
+        dropLayer.setPadding(dp(14), clear, dp(18), 0)
         sizeLayer(dropLayer, w, h)
         setGlow(blue, pulsing = !hovering)
         setShown(true)
@@ -591,8 +873,10 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     fun showMedia(m: MediaState) {
         mode = Mode.MEDIA
+        val clear = cameraClearance()
         val w = expandedWidth()
-        val h = dp(196)
+        val h = dp(196) + clear
+        mediaLayer.setPadding(dp(22), clear + dp(16), dp(22), dp(12))
         sizeLayer(mediaLayer, w, h)
         updateMediaContent(m)
         compactBars.playing = false
@@ -616,6 +900,16 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun idleVisible() = cfg.showIdle && (geometry.holeW > 0 || !cfg.fitCamera)
 
     private fun compactH() = max(dp(cfg.heightDp), geometry.compactH)
+
+    /**
+     * Space reserved at the top of expanded pills so content sits under the
+     * camera cut-out instead of drawing through it.
+     */
+    private fun cameraClearance(): Int {
+        if (geometry.holeW <= 0) return dp(6)
+        // Keep content below the hole; a little extra so text clears the lens.
+        return max(geometry.holeH, compactH()) / 2 + dp(10)
+    }
 
     private fun cornerRadius() = min(sr.value * sPress.value, rect.height() / 2f)
 
@@ -649,6 +943,10 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
 
     private fun prepareCompact() {
+        videoPill = false
+        compactPlay.visibility = GONE
+        compactText.maxWidth = Int.MAX_VALUE
+        compactText.textSize = 14f
         val h = compactH()
         sizeLayer(compactLayer, compactWidth(), h)
         val icon = (h - dp(10)).coerceAtLeast(dp(12))
@@ -658,14 +956,20 @@ class IslandView(context: Context) : FrameLayout(context) {
         compactLayer.setPadding(dp(5), 0, dp(14), 0)
     }
 
-    // Art and bars sit either side of the camera, with the camera's own
-    // width (or the idle width when there's no camera) as the gap between.
-    private fun compactWidth(): Int {
-        val gap = if (geometry.holeW > 0) geometry.holeW + dp(40) else dp(cfg.widthDp)
-        return gap + 2 * compactH() + dp(28)
+    // Art and bars sit either side of the camera. Width is extra beyond the
+    // hole (starts at 0 = just the hole). Gap is padding on each side.
+    private fun holePad() = dp(cfg.holeGapDp.coerceAtLeast(0))
+
+    /** Horizontal span reserved for the camera hole + user width/gap. */
+    private fun centerSpan(): Int {
+        val extra = dp(cfg.widthDp.coerceAtLeast(0))
+        return if (geometry.holeW > 0) geometry.holeW + 2 * holePad() + extra
+        else extra
     }
 
-    private fun statusGapWidth() = if (geometry.holeW > 0) geometry.holeW + dp(24) else dp(16)
+    private fun compactWidth(): Int = centerSpan() + 2 * compactH() + dp(28)
+
+    private fun statusGapWidth(): Int = centerSpan().coerceAtLeast(dp(16))
 
     private fun statusWidth() = min(expandedWidth(), statusGapWidth() + dp(2 * 98 + 28))
 
@@ -740,6 +1044,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         callbacks?.onTouchArea(area)
     }
 
+    /** Room above the pill so its glow isn't cut off by the top of the window. */
+    val glowPad: Int get() = dp(16)
+
     private fun topFor(h: Float, ch: Float) = max(0f, (ch - h) / 2f)
 
     private fun redraw() {
@@ -749,7 +1056,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         val ch = compactH().toFloat()
         // the window spans the screen width, so window x == screen x
         val left = geometry.anchorX - w / 2f
-        val top = topFor(h, ch)
+        val top = topFor(h, ch) + glowPad
         rect.set(left, top, left + w, top + h)
         for (l in layers) if (l.visibility == VISIBLE) applyLayer(l)
         pillView.invalidateOutline()

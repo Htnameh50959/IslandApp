@@ -1,4 +1,18 @@
 <resources>
     <color name="ic_bg">#0A84FF</color>
     <color name="accent">#0A84FF</color>
+    <color name="bg">#E8EEF6</color>
+    <color name="bg_wash_top">#D9E6F7</color>
+    <color name="bg_wash_bottom">#F2F5FA</color>
+    <color name="bg_glow_island">#660A84FF</color>
+    <color name="bg_glow_cool">#4022D3EE</color>
+    <color name="bg_glow_warm">#33FF9F0A</color>
+    <color name="text">#0F172A</color>
+    <color name="text2">#64748B</color>
+    <color name="divider">#1A0F172A</color>
+    <color name="glass_top">#CCFFFFFF</color>
+    <color name="glass_bottom">#99F8FAFC</color>
+    <color name="glass_stroke">#E6FFFFFF</color>
+    <color name="glass_sheen">#59FFFFFF</color>
+    <color name="glass_blur_tint">#66F3F5F9</color>
 </resources>

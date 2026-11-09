@@ -63,8 +63,8 @@
             <TextView style="@style/Hint" android:text="@string/restricted_hint" />
         </LinearLayout>
 
-        <!-- ───────── Appearance ───────── -->
-        <TextView style="@style/Section" android:text="Fit it to your camera" />
+        <!-- ───────── Island size ───────── -->
+        <TextView style="@style/Section" android:text="Edit island size" />
         <LinearLayout style="@style/Card">
 
             <Switch android:id="@+id/swFit" style="@style/SwitchRow" android:text="Find my camera automatically" />
@@ -72,16 +72,36 @@
             <View style="@style/Divider" />
 
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Width when there\u2019s no camera" />
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Island width" />
                 <TextView android:id="@+id/valWidth" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekWidth" style="@style/Seek" />
+            <TextView style="@style/RowSub" android:paddingBottom="8dp"
+                android:text="Starts at 0 dp. Extra width beyond the camera hole — drag up to grow the island." />
 
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Height" />
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Island height" />
                 <TextView android:id="@+id/valHeight" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekHeight" style="@style/Seek" />
+            <TextView style="@style/RowSub" android:paddingBottom="8dp"
+                android:text="How tall the pill is. Never smaller than the camera hole." />
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Gap around camera" />
+                <TextView android:id="@+id/valHoleGap" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekHoleGap" style="@style/Seek" />
+            <TextView style="@style/RowSub" android:paddingBottom="8dp"
+                android:text="Starts at 0 dp. Space between the camera hole and the content on each side." />
+
+            <LinearLayout style="@style/Row">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Notification gap" />
+                <TextView android:id="@+id/valNotifGap" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekNotifGap" style="@style/Seek" />
+            <TextView style="@style/RowSub" android:paddingBottom="8dp"
+                android:text="Extra space under the camera hole inside notifications." />
 
             <LinearLayout style="@style/Row">
                 <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move up or down" />
@@ -99,30 +119,169 @@
         <!-- ───────── Features ───────── -->
         <TextView style="@style/Section" android:text="Features" />
         <LinearLayout style="@style/Card">
-            <Switch android:id="@+id/swEnabled" style="@style/SwitchRow" android:text="Island enabled" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Island enabled" />
+                    <TextView style="@style/RowSub" android:text="Master switch for the floating island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swEnabled" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swIdle" style="@style/SwitchRow" android:text="Show pill when idle" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Music playback" />
+                    <TextView style="@style/RowSub" android:text="Shows music information and playback activity" />
+                </LinearLayout>
+                <Switch android:id="@+id/swMedia" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swNotif" style="@style/SwitchRow" android:text="Pop-out notifications" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Timer &amp; stopwatch" />
+                    <TextView style="@style/RowSub" android:text="Displays running timer / stopwatch status" />
+                </LinearLayout>
+                <Switch android:id="@+id/swLiveActivities" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swMedia" style="@style/SwitchRow" android:text="Now playing &amp; controls" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Navigation" />
+                    <TextView style="@style/RowSub" android:text="Shows live navigation information" />
+                </LinearLayout>
+                <Switch android:id="@+id/swNavigation" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swCharging" style="@style/SwitchRow" android:text="Charging indicator" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Call status" />
+                    <TextView style="@style/RowSub" android:text="Can show ongoing system activity" />
+                </LinearLayout>
+                <Switch android:id="@+id/swCall" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swStatus" style="@style/SwitchRow" android:text="Status pop-ups: earbuds, silent mode, Do Not Disturb" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Copy &amp; Go" />
+                    <TextView style="@style/RowSub" android:text="Recognises copied text and suggests actions" />
+                </LinearLayout>
+                <Switch android:id="@+id/swCopy" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swCopy" style="@style/SwitchRow" android:text="Copy suggestions: open copied links, call copied numbers" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Drag &amp; Go" />
+                    <TextView style="@style/RowSub" android:text="Drag images or text to the island to share or open them" />
+                </LinearLayout>
+                <Switch android:id="@+id/swDrop" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swDrop" style="@style/SwitchRow" android:text="Drag text or a link to the top to share it" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Smart suggestions" />
+                    <TextView style="@style/RowSub" android:text="Recommends apps based on the content you\u2019re handling" />
+                </LinearLayout>
+                <Switch android:id="@+id/swSuggestions" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swGlow" style="@style/SwitchRow" android:text="Glow around the island" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Stop system notifications" />
+                    <TextView style="@style/RowSub" android:text="Hide shade banners so notifications only come through the Island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swRouteNotifications" style="@style/FeatureSwitch" />
+            </LinearLayout>
             <View style="@style/Divider" />
-            <Switch android:id="@+id/swLandscape" style="@style/SwitchRow" android:text="Hide in landscape" />
+
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Pop-out notifications" />
+                    <TextView style="@style/RowSub" android:text="Show incoming notifications in the Island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swNotif" style="@style/FeatureSwitch" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- ───────── More ───────── -->
+        <TextView style="@style/Section" android:text="More" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Show pill when idle" />
+                    <TextView style="@style/RowSub" android:text="Keep a small island over the camera when nothing is active" />
+                </LinearLayout>
+                <Switch android:id="@+id/swIdle" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Videos" />
+                    <TextView style="@style/RowSub" android:text="YouTube and other video apps when you leave the app" />
+                </LinearLayout>
+                <Switch android:id="@+id/swVideo" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Charging indicator" />
+                    <TextView style="@style/RowSub" android:text="Battery level when you plug in" />
+                </LinearLayout>
+                <Switch android:id="@+id/swCharging" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Status pop-ups" />
+                    <TextView style="@style/RowSub" android:text="Earbuds, silent mode and Do Not Disturb" />
+                </LinearLayout>
+                <Switch android:id="@+id/swStatus" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Hotspot devices" />
+                    <TextView style="@style/RowSub" android:text="Show personal hotspot on and how many devices are connected" />
+                </LinearLayout>
+                <Switch android:id="@+id/swHotspot" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Face ID animation" />
+                    <TextView style="@style/RowSub" android:text="Only while face unlock is checking on the lock screen" />
+                </LinearLayout>
+                <Switch android:id="@+id/swFaceId" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Glow" />
+                    <TextView style="@style/RowSub" android:text="Soft coloured light around the island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swGlow" style="@style/FeatureSwitch" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/FeatureRow">
+                <LinearLayout style="@style/FeatureText">
+                    <TextView style="@style/RowTitle" android:text="Hide in landscape" />
+                    <TextView style="@style/RowSub" android:text="Hide the island when the phone is sideways" />
+                </LinearLayout>
+                <Switch android:id="@+id/swLandscape" style="@style/FeatureSwitch" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ───────── Try it ───────── -->
         <TextView style="@style/Section" android:text="Try it" />
         <Button android:id="@+id/btnPreview" style="@style/WideButton" android:text="Preview a pop-out" />
+        <Button android:id="@+id/btnFaceId" style="@style/WideButton.Secondary" android:text="Preview Face ID" />
         <Button android:id="@+id/btnTest" style="@style/WideButton.Secondary" android:text="Send a real test notification" />
         <Button android:id="@+id/btnReset" style="@style/WideButton.Secondary" android:text="Reset to defaults" />
 

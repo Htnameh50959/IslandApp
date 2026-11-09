@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.content.ClipboardManager
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -49,8 +50,9 @@ import kotlin.math.roundToInt
  * Owns the overlay window and decides what the island shows.
  *
  * Priority (highest first):
- *   drop target › suggestion card (copied link…) › notification › status
- *   (earbuds, silent…) › charging › expanded player › compact "now playing" › idle
+ *   drop target › suggestion card (copied link…) › notification › hotspot
+ *   (connected devices) › status (earbuds, silent…) › charging ›
+ *   expanded player › compact "now playing" › idle
  */
 class IslandService : AccessibilityService(),
     IslandBus.Listener,
@@ -103,9 +105,15 @@ class IslandService : AccessibilityService(),
     private var btConnectedAt = 0L
     private var btName: String? = null
 
+    private var hotspot: HotspotMonitor? = null
+
     private val clearNotif = Runnable { notif = null; render() }
     private val clearCharge = Runnable { charge = null; render() }
-    private val clearStatus = Runnable { status = null; render() }
+    private val clearStatus = Runnable {
+        if (status?.title == "Face ID") faceScanActive = false
+        status = null
+        render()
+    }
     private val clearCard = Runnable { card = null; render() }
     private val collapseMedia = Runnable { mediaExpanded = false; render() }
     private val progressTick = object : Runnable {
@@ -137,6 +145,19 @@ class IslandService : AccessibilityService(),
                 BluetoothDevice.ACTION_ACL_CONNECTED -> onBluetooth(intent, connected = true)
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> onBluetooth(intent, connected = false)
                 ACTION_BT_BATTERY -> onBluetoothBattery(intent)
+                Intent.ACTION_SCREEN_ON -> if (cfg.faceId) {
+                    screenOnAt = SystemClock.uptimeMillis()
+                    // Only while the lock screen is up and face unlock is enabled —
+                    // never on a normal wake of an already-unlocked phone.
+                    maybeStartFaceScan()
+                }
+                Intent.ACTION_USER_PRESENT -> finishFaceScan(unlocked = true)
+                Intent.ACTION_SCREEN_OFF -> {
+                    faceScanActive = false
+                    if (status?.title == "Face ID") {
+                        handler.removeCallbacks(clearStatus); status = null; render()
+                    }
+                }
                 AudioManager.RINGER_MODE_CHANGED_ACTION -> when (intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, -1)) {
                     AudioManager.RINGER_MODE_SILENT -> showStatus(Status(R.drawable.ic_bell_off, RED, "Silent", "On", RED))
                     AudioManager.RINGER_MODE_VIBRATE -> showStatus(Status(R.drawable.ic_vibrate, ORANGE, "Vibrate", "On", ORANGE))
@@ -237,6 +258,9 @@ class IslandService : AccessibilityService(),
             addAction(ACTION_BT_BATTERY)
             addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_EXPORTED)
@@ -244,8 +268,16 @@ class IslandService : AccessibilityService(),
             registerReceiver(statusReceiver, statusFilter)
         }
         receiverRegistered = true
+        // The moment the lock screen opens (face matched), not when the system gets round to
+        // the later USER_PRESENT broadcast: that's what keeps the check in sync with the unlock.
+        if (Build.VERSION.SDK_INT >= 33) {
+            runCatching {
+                getSystemService(KeyguardManager::class.java)?.addKeyguardLockedStateListener(mainExecutor, keyguardListener)
+            }
+        }
         runCatching { getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
         Prefs.get(this).registerOnSharedPreferenceChangeListener(this)
+        hotspot = HotspotMonitor(this) { render() }.also { it.start() }
         IslandBus.listener = this // replays current media state → render()
         render()
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "service connected")
@@ -265,6 +297,7 @@ class IslandService : AccessibilityService(),
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         e ?: return
         if (DEBUG_COPY) debugEvent(e)
+        trackForeground(e)
         if (!cfg.copySuggestions) return
         when (e.eventType) {
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
@@ -296,6 +329,64 @@ class IslandService : AccessibilityService(),
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ->
                 if (e.packageName == "com.android.systemui") readClipboardPreview()
         }
+    }
+
+    /** The app on screen, so a video's pill only shows once you've left its app. */
+    private var foregroundPkg: String? = null
+
+    private var screenOnAt = 0L
+    /** True only while a lock-screen face check is in progress. */
+    private var faceScanActive = false
+
+    /** Face unlock is set up for the lock screen. With it off (PIN / fingerprint only) the Face ID pill never shows. */
+    private fun faceUnlockOn(): Boolean = runCatching {
+        android.provider.Settings.Secure.getInt(contentResolver, "face_unlock_keyguard_enabled", 0) == 1
+    }.getOrDefault(false)
+
+    private fun maybeStartFaceScan() {
+        if (!cfg.faceId || !faceUnlockOn()) return
+        val km = getSystemService(KeyguardManager::class.java) ?: return
+        if (km.isKeyguardLocked != true) return
+        faceScanActive = true
+        showStatus(Status(R.drawable.ic_face_scan, WHITE, "Face ID", "Scanning", GREY), 5000)
+    }
+
+    private fun finishFaceScan(unlocked: Boolean) {
+        if (!faceScanActive && status?.title != "Face ID") return
+        faceScanActive = false
+        if (!unlocked || !cfg.faceId) {
+            if (status?.title == "Face ID") {
+                handler.removeCallbacks(clearStatus); status = null; render()
+            }
+            return
+        }
+        // Success only if we were actually scanning — not for PIN / fingerprint unlocks.
+        if (status?.title == "Face ID" && status?.value == "Scanning") {
+            showStatus(Status(R.drawable.ic_face_ok, GREEN, "Face ID", "Unlocked", GREEN), 1400)
+        } else if (status?.title == "Face ID") {
+            handler.removeCallbacks(clearStatus); status = null; render()
+        }
+    }
+
+    private val keyguardListener = KeyguardManager.KeyguardLockedStateListener { locked ->
+        if (!cfg.faceId) return@KeyguardLockedStateListener
+        if (locked) {
+            // Lock screen came up (timeout / power) — start scanning if face unlock is on.
+            if (SystemClock.uptimeMillis() - screenOnAt < 2500 || getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
+                maybeStartFaceScan()
+            }
+        } else {
+            finishFaceScan(unlocked = true)
+        }
+    }
+
+    private fun trackForeground(e: AccessibilityEvent) {
+        if (e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = e.packageName?.toString() ?: return
+        if (pkg == "com.android.systemui" || pkg == packageName || "inputmethod" in pkg || "keyboard" in pkg) return
+        if (pkg == foregroundPkg) return
+        foregroundPkg = pkg
+        if (media?.isVideo == true) render()
     }
 
     // TEMP: what the phone reports around copying (labels and lengths only, never the text)
@@ -400,10 +491,10 @@ class IslandService : AccessibilityService(),
         render()
     }
 
-    private fun showStatus(st: Status) {
+    private fun showStatus(st: Status, holdMs: Long = 2400) {
         status = st
         handler.removeCallbacks(clearStatus)
-        handler.postDelayed(clearStatus, 2400)
+        handler.postDelayed(clearStatus, holdMs)
         render()
     }
 
@@ -519,10 +610,15 @@ class IslandService : AccessibilityService(),
         if (receiverRegistered) {
             runCatching { unregisterReceiver(powerReceiver) }
             runCatching { unregisterReceiver(statusReceiver) }
+            if (Build.VERSION.SDK_INT >= 33) runCatching {
+                getSystemService(KeyguardManager::class.java)?.removeKeyguardLockedStateListener(keyguardListener)
+            }
             receiverRegistered = false
         }
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(this)
         runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
+        hotspot?.stop()
+        hotspot = null
         island?.let { v -> runCatching { wm?.removeView(v) } }
         touchPad?.let { v -> runCatching { wm?.removeView(v) } }
         grabView?.let { v -> runCatching { wm?.removeView(v) } }
@@ -532,10 +628,20 @@ class IslandService : AccessibilityService(),
     }
 
     override fun onSharedPreferenceChanged(prefs: SharedPreferences?, key: String?) {
-        cfg = IslandConfig.load(this)
-        island?.cfg = cfg
-        applyPosition()
-        render()
+        reloadFromPrefs()
+    }
+
+    override fun onPrefsChanged() {
+        reloadFromPrefs()
+    }
+
+    private fun reloadFromPrefs() {
+        handler.post {
+            cfg = IslandConfig.load(this)
+            island?.cfg = cfg
+            applyPosition()
+            render()
+        }
     }
 
     // ── Events from the listener ────────────────────────────────────────────
@@ -547,7 +653,8 @@ class IslandService : AccessibilityService(),
         notifShownAt = SystemClock.uptimeMillis()
         mediaExpanded = false
         handler.removeCallbacks(clearNotif)
-        handler.postDelayed(clearNotif, 4500)
+        // Ongoing call, navigation and timer cards remain until their source removes them.
+        if (!event.isLiveActivity) handler.postDelayed(clearNotif, 4500)
         render()
     }
 
@@ -557,6 +664,16 @@ class IslandService : AccessibilityService(),
             notif = null
             render()
         }
+    }
+
+    /** "Preview Face ID" button: scanning, then the green check. */
+    override fun onFaceIdPreview() {
+        faceScanActive = true
+        showStatus(Status(R.drawable.ic_face_scan, WHITE, "Face ID", "Scanning", GREY), 1600)
+        handler.postDelayed({
+            faceScanActive = false
+            showStatus(Status(R.drawable.ic_face_ok, GREEN, "Face ID", "Unlocked", GREEN), 1400)
+        }, 1600)
     }
 
     override fun onMedia(state: MediaState?) {
@@ -573,19 +690,27 @@ class IslandService : AccessibilityService(),
             "render drop=$dropActive card=${card != null} notif=${notif != null} status=${status != null} " +
                 "charge=${charge != null} media=${media != null} exp=$mediaExpanded cfgNotif=${cfg.notifications} enabled=${cfg.enabled}",
         )
-        val m = media?.takeIf { cfg.media }
+        val m = media?.takeIf { cfg.media && (!it.isVideo || cfg.videoPill) }
         if (m == null) mediaExpanded = false
         val n = notif
         val c = charge
         val k = card
         val st = status
+        val p = hotspot
+        val hotspotOn = cfg.hotspotDevices && p?.hotspotOn == true
+        v.setStrip(hotspotOn, p?.hotspotClients ?: 0, c)
         when {
             dropActive -> v.showDropTarget(dropHover)
             k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
+            n != null && n.isLiveActivity -> v.showLiveActivity(n.liveKind, n.title, n.text)
             n != null -> v.showNotification(n.icon, n.title, n.text)
+            st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked")
+            hotspotOn -> v.showHotspot(p?.hotspotClients ?: 0)
             st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
             c != null -> v.showCharging(c.first, c.second)
             mediaExpanded && m != null -> v.showMedia(m)
+            m != null && m.isVideo ->
+                if (m.packageName != foregroundPkg) v.showCompactVideo(m) else v.showIdle()
             m != null && m.playing -> v.showCompactMedia(m)
             else -> v.showIdle()
         }
@@ -675,9 +800,10 @@ class IslandService : AccessibilityService(),
         // (the media player) plus its bounce. It is never resized while the
         // island animates.
         lp.x = 0
-        lp.y = maxOf(0, anchorY - pillH / 2) + (cfg.offsetYDp * d).roundToInt()
+        lp.y = maxOf(0, anchorY - pillH / 2) + (cfg.offsetYDp * d).roundToInt() - v.glowPad
         lp.width = screen.x
-        lp.height = (260 * d).roundToInt()
+        // Extra room so expanded media / notifications can clear the camera hole.
+        lp.height = (300 * d).roundToInt() + v.glowPad + holeH
         if (update) updateWindow()
     }
 
@@ -720,7 +846,7 @@ class IslandService : AccessibilityService(),
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "tap")
         val v = island ?: return
         when (v.mode) {
-            Mode.NOTIFICATION -> notif?.let { openNotification(it) }
+            Mode.NOTIFICATION, Mode.LIVE -> notif?.let { openNotification(it) }
             // tapping the card itself (not one of its buttons) closes it
             Mode.ACTIONS -> {
                 handler.removeCallbacks(clearCard)
@@ -731,6 +857,19 @@ class IslandService : AccessibilityService(),
                 handler.removeCallbacks(clearStatus)
                 status = null
                 render()
+            }
+            Mode.HOTSPOT -> {
+                // Open the system hotspot / tethering settings when possible.
+                runCatching {
+                    startActivity(
+                        Intent("android.settings.TETHER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.recoverCatching {
+                    startActivity(
+                        Intent(android.provider.Settings.ACTION_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
             }
             Mode.DROP -> Unit
             Mode.CHARGING -> {
@@ -752,7 +891,7 @@ class IslandService : AccessibilityService(),
     override fun onLongPress() {
         val v = island ?: return
         when {
-            v.mode == Mode.NOTIFICATION -> dismissAll()
+            v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE -> dismissAll()
             media != null && cfg.media && v.mode != Mode.MEDIA -> expandMedia()
             else -> v.bounce()
         }
@@ -776,7 +915,8 @@ class IslandService : AccessibilityService(),
             card = null
             changed = true
         }
-        if (notif != null && SystemClock.uptimeMillis() - notifShownAt > 700) {
+        // Live activities (calls, timers, navigation) stay until the source ends them.
+        if (notif != null && !notif!!.isLiveActivity && SystemClock.uptimeMillis() - notifShownAt > 700) {
             handler.removeCallbacks(clearNotif)
             notif = null
             changed = true
@@ -824,15 +964,19 @@ class IslandService : AccessibilityService(),
         status = null
         card = null
         mediaExpanded = false
+        faceScanActive = false
         render()
     }
 
     private fun openNotification(n: NotifEvent) {
         n.contentIntent?.let { send(it) }
         if (n.autoCancel) IslandBus.cancel(n.key)
-        handler.removeCallbacks(clearNotif)
-        notif = null
-        render()
+        // Keep sticky live activities on the island; only clear ordinary pop-outs.
+        if (!n.isLiveActivity) {
+            handler.removeCallbacks(clearNotif)
+            notif = null
+            render()
+        }
     }
 
     @Suppress("DEPRECATION")

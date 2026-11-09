@@ -8,6 +8,8 @@ object Prefs {
     const val SHOW_IDLE = "show_idle"
     const val WIDTH = "width"
     const val HEIGHT = "height"
+    const val HOLE_GAP = "hole_gap"
+    const val NOTIF_GAP = "notif_gap"
     const val OFFSET_Y = "offset_y"
     const val OFFSET_X = "offset_x"
     const val NOTIFICATIONS = "notifications"
@@ -19,6 +21,14 @@ object Prefs {
     const val COPY = "copy_suggestions"
     const val STATUS = "status_popups"
     const val DROP = "drag_drop"
+    const val FACE_ID = "face_id"
+    const val VIDEO = "video_pill"
+    /** Stop dismissible shade banners and show those notifications only in the Island. */
+    const val ROUTE_NOTIFICATIONS = "route_notifications"
+    /** Calls, navigation, timers and stopwatches stay as compact live pills. */
+    const val LIVE_ACTIVITIES = "live_activities"
+    /** Hotspot on / connected-devices pill. */
+    const val HOTSPOT = "hotspot_devices"
 
     fun get(ctx: Context): SharedPreferences = ctx.getSharedPreferences("island", Context.MODE_PRIVATE)
 }
@@ -26,8 +36,12 @@ object Prefs {
 data class IslandConfig(
     val enabled: Boolean = true,
     val showIdle: Boolean = true,
-    val widthDp: Int = 110,
+    val widthDp: Int = 0,
     val heightDp: Int = 32,
+    /** Extra space between the camera hole and island content (each side). */
+    val holeGapDp: Int = 0,
+    /** Extra space under the camera hole inside notifications. */
+    val notifGapDp: Int = 8,
     val offsetYDp: Int = 0,
     val offsetXDp: Int = 0,
     val notifications: Boolean = true,
@@ -44,6 +58,16 @@ data class IslandConfig(
     val statusPopups: Boolean = true,
     /** Drag text or a link to the top of the screen to share it. */
     val dragDrop: Boolean = true,
+    /** Face ID pill only while the lock screen is actively checking your face. */
+    val faceId: Boolean = true,
+    /** Show YouTube and other video apps in the island. */
+    val videoPill: Boolean = true,
+    /** Route dismissible app notifications to the Island instead of the system shade/banner. */
+    val routeNotifications: Boolean = false,
+    /** Keep ongoing calls, navigation and timers on the Island until they finish. */
+    val liveActivities: Boolean = true,
+    /** Show personal hotspot on / connected device count. */
+    val hotspotDevices: Boolean = true,
 ) {
     companion object {
         val DEFAULT = IslandConfig()
@@ -56,6 +80,8 @@ data class IslandConfig(
                 showIdle = p.getBoolean(Prefs.SHOW_IDLE, d.showIdle),
                 widthDp = p.getInt(Prefs.WIDTH, d.widthDp),
                 heightDp = p.getInt(Prefs.HEIGHT, d.heightDp),
+                holeGapDp = p.getInt(Prefs.HOLE_GAP, d.holeGapDp),
+                notifGapDp = p.getInt(Prefs.NOTIF_GAP, d.notifGapDp),
                 offsetYDp = p.getInt(Prefs.OFFSET_Y, d.offsetYDp),
                 offsetXDp = p.getInt(Prefs.OFFSET_X, d.offsetXDp),
                 notifications = p.getBoolean(Prefs.NOTIFICATIONS, d.notifications),
@@ -67,6 +93,11 @@ data class IslandConfig(
                 copySuggestions = p.getBoolean(Prefs.COPY, d.copySuggestions),
                 statusPopups = p.getBoolean(Prefs.STATUS, d.statusPopups),
                 dragDrop = p.getBoolean(Prefs.DROP, d.dragDrop),
+                faceId = p.getBoolean(Prefs.FACE_ID, d.faceId),
+                videoPill = p.getBoolean(Prefs.VIDEO, d.videoPill),
+                routeNotifications = p.getBoolean(Prefs.ROUTE_NOTIFICATIONS, d.routeNotifications),
+                liveActivities = p.getBoolean(Prefs.LIVE_ACTIVITIES, d.liveActivities),
+                hotspotDevices = p.getBoolean(Prefs.HOTSPOT, d.hotspotDevices),
             )
         }
     }

@@ -8,6 +8,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 
+/** Origin Island-style live activities that stay on the pill until they finish. */
+enum class LiveKind { NONE, CALL, TIMER, NAVIGATION, ACTIVITY }
+
 data class NotifEvent(
     val key: String,
     val packageName: String,
@@ -16,6 +19,9 @@ data class NotifEvent(
     val icon: Drawable?,
     val contentIntent: PendingIntent?,
     val autoCancel: Boolean,
+    /** An ongoing call, navigation session, timer or stopwatch. */
+    val isLiveActivity: Boolean = false,
+    val liveKind: LiveKind = LiveKind.NONE,
 )
 
 data class MediaState(
@@ -29,7 +35,11 @@ data class MediaState(
     val positionUpdatedAt: Long,
     val speed: Float,
     val controller: MediaController?,
+    val packageName: String = "",
 ) {
+    /** True for video apps (YouTube, Netflix, ...): shown as a title + play/pause pill. */
+    val isVideo: Boolean get() = packageName in VIDEO_PACKAGES
+
     fun currentPosition(): Long {
         if (positionMs < 0) return 0
         if (!playing) return positionMs
@@ -48,6 +58,8 @@ object IslandBus {
         fun onNotification(event: NotifEvent)
         fun onNotificationRemoved(key: String)
         fun onMedia(state: MediaState?)
+        fun onFaceIdPreview()
+        fun onPrefsChanged()
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -71,6 +83,14 @@ object IslandBus {
         main.post { listener?.onNotification(e) }
     }
 
+    fun postFaceIdPreview() {
+        main.post { listener?.onFaceIdPreview() }
+    }
+
+    fun reloadPrefs() {
+        main.post { listener?.onPrefsChanged() }
+    }
+
     fun postRemoved(key: String) {
         main.post { listener?.onNotificationRemoved(key) }
     }
@@ -86,3 +106,12 @@ object IslandBus {
         canceller?.invoke(key)
     }
 }
+
+val VIDEO_PACKAGES = setOf(
+    "com.google.android.youtube", "app.revanced.android.youtube", "com.vanced.android.youtube",
+    "com.netflix.mediaclient", "com.amazon.avod.thirdpartyclient", "in.startv.hotstar",
+    "com.google.android.videos", "com.mxtech.videoplayer.ad", "com.mxtech.videoplayer.pro",
+    "org.videolan.vlc", "tv.twitch.android.app", "com.vivo.video", "com.sonyliv",
+    "com.jio.media.ondemand", "com.graymatrix.did", "com.vivo.gallery", "com.android.gallery3d",
+    "com.google.android.apps.photos",
+)
