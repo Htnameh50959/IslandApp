@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.Switch
@@ -78,14 +79,14 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
             }
         }
-        findViewById<Button>(R.id.btnPreview).setOnClickListener { preview() }
-        findViewById<Button>(R.id.btnFaceId).setOnClickListener {
+        findViewById<View>(R.id.btnPreview).setOnClickListener { preview() }
+        findViewById<View>(R.id.btnFaceId).setOnClickListener {
             if (!IslandBus.isOverlayRunning) {
                 Toast.makeText(this, "Turn on step 1 first", Toast.LENGTH_SHORT).show()
             } else IslandBus.postFaceIdPreview()
         }
-        findViewById<Button>(R.id.btnTest).setOnClickListener { sendTestNotification() }
-        findViewById<Button>(R.id.btnReset).setOnClickListener {
+        findViewById<View>(R.id.btnTest).setOnClickListener { sendTestNotification() }
+        findViewById<View>(R.id.btnReset).setOnClickListener {
             prefs.edit().clear().apply()
             recreate()
         }
@@ -96,9 +97,9 @@ class MainActivity : Activity() {
         val a11y = isAccessibilityEnabled()
         val listener = getSystemService(NotificationManager::class.java)
             .isNotificationListenerAccessGranted(ComponentName(this, IslandNotificationListener::class.java))
-        setStatus(R.id.statusA11y, R.id.btnA11y, a11y, "Island is on screen", "Turn on “Island” in Accessibility")
-        setStatus(R.id.statusNotif, R.id.btnNotif, listener, "Pop-outs & music active", "Allow notification access")
-        setStatus(R.id.statusBt, R.id.btnBt, hasBluetooth(), "Shows your earbuds when they connect", "Allow nearby devices (Bluetooth)")
+        setStatus(R.id.statusA11y, R.id.btnA11y, a11y, "On", "Needs Accessibility")
+        setStatus(R.id.statusNotif, R.id.btnNotif, listener, "On", "Needs notification access")
+        setStatus(R.id.statusBt, R.id.btnBt, hasBluetooth(), "On", "Needs nearby devices")
     }
 
     private fun hasBluetooth() = Build.VERSION.SDK_INT < 31 ||
@@ -106,12 +107,14 @@ class MainActivity : Activity() {
 
     private fun setStatus(statusId: Int, buttonId: Int, on: Boolean, onText: String, offText: String) {
         findViewById<TextView>(statusId).apply {
-            text = if (on) "● $onText" else "○ $offText"
-            setTextColor(if (on) 0xFF30D158.toInt() else 0xFFFF9F0A.toInt())
+            text = if (on) onText else offText
+            setTextColor(getColor(if (on) R.color.text2 else R.color.warn))
         }
+        // Done: a quiet "Settings" link. To do: the one filled button on the row.
         findViewById<Button>(buttonId).apply {
-            text = if (on) "Manage" else "Enable"
+            text = if (on) "Settings" else "Turn on"
             setBackgroundResource(if (on) R.drawable.btn_secondary else R.drawable.btn_primary)
+            setTextColor(if (on) getColor(R.color.accent) else 0xFFFFFFFF.toInt())
         }
     }
 
@@ -120,12 +123,12 @@ class MainActivity : Activity() {
     private fun cameraInfo(): String {
         val cut = if (Build.VERSION.SDK_INT >= 29) windowManager.defaultDisplay.cutout?.boundingRectTop else null
         if (cut == null || cut.isEmpty) {
-            return "No camera cut-out on this phone. The island appears from the top of the screen and hides when idle."
+            return "No camera cut-out here, so the island comes from the top of the screen."
         }
         val d = resources.displayMetrics.density
         val kind = if (cut.width() <= cut.height() * 1.3f) "Punch-hole camera" else "Notch"
-        return "$kind found (${(cut.width() / d).toInt()} × ${(cut.height() / d).toInt()} dp). " +
-            "The island grows out of it. Use the sliders below if it’s slightly off."
+        return "$kind found, ${(cut.width() / d).toInt()} × ${(cut.height() / d).toInt()} dp. " +
+            "Nudge the island below if it doesn’t sit right."
     }
 
     private fun isAccessibilityEnabled(): Boolean {
@@ -200,10 +203,12 @@ class MainActivity : Activity() {
                 key = "island-preview",
                 packageName = packageName,
                 title = "Hello from the Island ✨",
-                text = "Tap to open · long-press or swipe up to dismiss",
-                icon = getDrawable(R.mipmap.ic_launcher),
+                text = "Tap to expand, tap again to open. Long-press for controls, swipe up to dismiss.",
+                icon = null,
                 contentIntent = null,
                 autoCancel = false,
+                appIcon = getDrawable(R.mipmap.ic_launcher),
+                appName = "Island",
             )
         )
     }

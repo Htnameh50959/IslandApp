@@ -13,17 +13,17 @@ Works on Android 9 and newer. Tested on a vivo Y200 (Android 15).
 | Timer & stopwatch | A compact live pill with the running time. Stays until the timer ends. |
 | Navigation | Live maps / navigation status as a compact pill until you arrive. |
 | Call status | Ongoing or ringing calls stay on the island until they finish. |
-| Notifications | Grow out of the camera with the app icon, title and text. Tap to open. Turn on **Stop system banners** to hide dismissible shade banners so they only appear here. |
+| Notifications | Grow out of the camera as a card with the sender's photo and the app's icon, title and message. The card's height follows the message. Tap to expand it to the full message, tap again to open the app. Long-press for its controls (Mark as read, Pause, Hang up…). Flick sideways to go to the next waiting notification. Notifications that arrive together wait their turn instead of replacing each other. Turn on **Stop system banners** to hide dismissible shade banners so they only appear here. |
 | Copy & Go | Recognises copied links, numbers and emails and suggests **Open / Share**, **Call / Message / New contact**, **Email / New contact**, or **Search / Translate / Share**. Passwords are shown as dots. |
 | Drag & Go | Drag text, a link or a photo to the top of the screen to share or open it (from apps that allow dragging between apps, mostly in split screen). |
 | Smart suggestions | Buttons use the real app icons that will handle the content. |
 | Earbuds / silent / DND | Shows earbuds name and battery, and silent / vibrate / ring / Do Not Disturb changes. |
-| Face ID animation | When a locked phone wakes and unlocks, a Face ID-style scan then green check. Animation only — your phone does the real unlock. |
+| Unlock animation | When a locked phone wakes, a Face ID-style scan; when it unlocks, a green face, fingerprint or open lock showing what unlocked it, also when face unlock keeps you on the lock screen. Animation only — your phone does the real unlock. |
 | Charging | Green bolt and battery level when you plug in. |
 
 **Music vs video:** apps in a built-in list of video apps (`VIDEO_PACKAGES` in `IslandBus.kt`) get the video pill. Everything else gets the music pill. Android can't tell video from audio, so add an app's package name to that list if it's missing.
 
-**Closing:** swipe the island up, flick it sideways, or tap outside it. Tapping an empty part of a card also closes it. The island always stays as a small idle pill after an event clears, so it never disappears completely.
+**Gestures:** tap expands an activity, long-press shows its controls, swipe up dismisses it and a sideways flick moves to the next one (or changes song on the open player). Tapping outside folds an open card back (a new notification ignores outside taps for its first 2.5 seconds, so it isn't lost while you scroll). When an activity finishes the island folds back into the camera.
 
 ### Fits any phone
 

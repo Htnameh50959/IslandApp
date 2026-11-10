@@ -72,6 +72,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onTap()
         fun onLongPress()
         fun onSwipeUp()
+        /** Flicked sideways: switch to the next activity (or dismiss when there's none). */
+        fun onSwipeSideways(toLeft: Boolean)
         fun onOutsideTouch()
         fun onPrev()
         fun onPlayPause()
@@ -121,17 +123,27 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val rect = RectF()
     private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp(1) * 0.8f
+        strokeWidth = dp(1) * 0.75f
     }
     private val rimRect = RectF()
+    private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowRect = RectF()
 
     /** Soft light behind the pill, blurred (Android 12+). */
     private val glowView = object : View(context) {
         override fun onDraw(canvas: Canvas) {
+            // Depth: a soft shadow under the island (blurred by the view's RenderEffect).
+            if (Build.VERSION.SDK_INT >= 31 && rect.height() > 0f) {
+                val size = (rect.height() / max(1f, compactH().toFloat())).coerceIn(0f, 1f)
+                shadowPaint.alpha = (110 * size).roundToInt()
+                val drop = dp(5).toFloat()
+                glowRect.set(rect.left + dp(4), rect.top + drop, rect.right - dp(4), rect.bottom + drop)
+                val sr = min(cornerRadius(), glowRect.height() / 2f)
+                canvas.drawRoundRect(glowRect, sr, sr, shadowPaint)
+            }
             val a = glowStrength()
             if (a <= 0.01f) return
             glowPaint.color = glowColor
@@ -148,25 +160,51 @@ class IslandView(context: Context) : FrameLayout(context) {
         override fun onDraw(canvas: Canvas) {
             val r = cornerRadius()
             if (rect.height() <= 0f) return
-            // Liquid glass: translucent frosted body, top sheen, bright rim.
+            // Dark glass: a deep, mostly opaque body (text behind it must never
+            // compete with the island's own), lighter at the top like frosted
+            // glass catching light. Compact pills stay near-black so they melt
+            // into the camera.
+            val big = ((rect.height() / max(1f, compactH().toFloat())) - 1.2f).coerceIn(0f, 1f)
+            val topAlpha = (0xF4 - 0x10 * big).roundToInt()
             pillPaint.shader = LinearGradient(
                 0f, rect.top, 0f, rect.bottom,
-                0xC73A3A42.toInt(), 0xEB08080C.toInt(), Shader.TileMode.CLAMP,
+                Color.argb(topAlpha, 0x1E, 0x1E, 0x24), Color.argb(0xF8, 0x04, 0x04, 0x06),
+                Shader.TileMode.CLAMP,
             )
             canvas.drawRoundRect(rect, r, r, pillPaint)
-            sheenPaint.shader = LinearGradient(
-                0f, rect.top, 0f, rect.top + rect.height() * 0.55f,
-                0x38FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP,
-            )
-            canvas.drawRoundRect(rect, r, r, sheenPaint)
-            val sw = rimPaint.strokeWidth / 2f
-            rimRect.set(rect.left + sw, rect.top + sw, rect.right - sw, rect.bottom - sw)
-            rimPaint.shader = LinearGradient(
-                rect.left, rect.top, rect.right, rect.bottom,
-                intArrayOf(0x8CFFFFFF.toInt(), 0x1FFFFFFF, 0x59FFFFFF),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP,
-            )
-            canvas.drawRoundRect(rimRect, max(r - sw, 0f), max(r - sw, 0f), rimPaint)
+            // Big cards get a soft wash of the app's / album's colour rising from
+            // the bottom edge, like OriginOS 6's timer and music cards.
+            val tall = ((rect.height() / max(1f, compactH().toFloat())) - 1.4f).coerceIn(0f, 1f)
+            val tint = tintColor
+            if (tint != null && tall > 0f && tintLevel > 0f) {
+                val a = (0x5C * tall * tintLevel).roundToInt().coerceIn(0, 255)
+                sheenPaint.shader = LinearGradient(
+                    0f, rect.top + rect.height() * 0.35f, 0f, rect.bottom,
+                    Color.argb(0, Color.red(tint), Color.green(tint), Color.blue(tint)),
+                    Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
+                    Shader.TileMode.CLAMP,
+                )
+                canvas.drawRoundRect(rect, r, r, sheenPaint)
+            }
+            // Glass highlight along the top, and a hairline rim that is brighter
+            // at the top edge (soft neumorphic depth). Only on the open cards.
+            if (big > 0f) {
+                sheenPaint.shader = LinearGradient(
+                    0f, rect.top, 0f, rect.top + min(rect.height() * 0.4f, dp(56).toFloat()),
+                    Color.argb((0x1C * big).roundToInt(), 255, 255, 255), 0x00FFFFFF,
+                    Shader.TileMode.CLAMP,
+                )
+                canvas.drawRoundRect(rect, r, r, sheenPaint)
+                val sw = rimPaint.strokeWidth / 2f
+                rimRect.set(rect.left + sw, rect.top + sw, rect.right - sw, rect.bottom - sw)
+                rimPaint.shader = LinearGradient(
+                    0f, rect.top, 0f, rect.bottom,
+                    Color.argb((0x40 * big).roundToInt(), 255, 255, 255),
+                    Color.argb((0x0E * big).roundToInt(), 255, 255, 255),
+                    Shader.TileMode.CLAMP,
+                )
+                canvas.drawRoundRect(rimRect, max(r - sw, 0f), max(r - sw, 0f), rimPaint)
+            }
         }
     }
 
@@ -299,27 +337,61 @@ class IslandView(context: Context) : FrameLayout(context) {
         addView(statusStrip.row, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
     }
 
-    // ── Notification layer ──────────────────────────────────────────────────
-    // Top padding clears the camera hole so title/text sit below the notch
-    // (Origin Island style), instead of overlapping it.
+    // ── Notification layer (Origin Island card) ─────────────────────────────
+    //  [photo + app badge]  Title                         App
+    //                       Message text (2 lines, more when opened)
+    //                       [ Action ] [ Action ] [ Open ]      ← opened only
+    // Top padding clears the camera hole so the content sits below it.
     private val notifIcon = ImageView(context).apply {
         scaleType = ImageView.ScaleType.CENTER_CROP
+        rounded(14f)
+    }
+    /** The app's icon on the corner of the sender's photo. */
+    private val notifBadge = ImageView(context).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        val ring = dp(2)
+        setPadding(ring, ring, ring, ring)
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
         oval()
     }
     private val notifTitle = label(15f, Color.WHITE, bold = true)
-    private val notifText = label(13.5f, grey, lines = 2)
-    private val notifLayer = LinearLayout(context).apply {
+    private val notifApp = label(12f, grey).apply { gravity = Gravity.END }
+    private val notifText = label(13.5f, 0xFFC7C7CC.toInt(), lines = 2).apply {
+        setLineSpacing(dp(1.5f).toFloat(), 1f)
+    }
+    private val notifActions = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(16), dp(10), dp(26), dp(10))
-        addView(notifIcon, LinearLayout.LayoutParams(dp(48), dp(48)))
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-            addView(notifTitle)
-            addView(notifText, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
-        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        visibility = GONE
     }
+    private val notifLayer = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(10), dp(18), dp(14))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(FrameLayout(context).apply {
+                addView(notifIcon, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START))
+                addView(notifBadge, FrameLayout.LayoutParams(dp(21), dp(21), Gravity.BOTTOM or Gravity.END))
+            }, LinearLayout.LayoutParams(dp(52), dp(52)))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(notifTitle, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                    addView(notifApp, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(8) })
+                })
+                addView(notifText, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(3) })
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        addView(notifActions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+    }
+    /** Which notification the card shows, so an update of the same one doesn't blink. */
+    private var notifKey: String? = null
+    private var notifExpanded = false
+    private var notifControls = false
 
     // ── Action card layer (copied link / number / email, dropped text) ──────
     private val actionBadge = ImageView(context).apply {
@@ -332,6 +404,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         maxLines = 5
         setLineSpacing(dp(2).toFloat(), 1f)
     }
+    private var actionKey: String? = null
     private val actionRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -461,6 +534,29 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
+    // ── Inner colour wash (see pillView) ───────────────────────────────────
+    private var tintColor: Int? = null
+    private var tintLevel = 0f
+    private var tintAnim: ValueAnimator? = null
+
+    /** Colour for the wash at the bottom of a big card (null = plain black). */
+    private fun setTint(color: Int?) {
+        val c = color?.takeIf { it != Color.WHITE }
+        if (c != null) tintColor = c
+        val target = if (c != null) 1f else 0f
+        if (tintLevel == target && tintAnim?.isRunning != true) return
+        tintAnim?.cancel()
+        tintAnim = ValueAnimator.ofFloat(tintLevel, target).apply {
+            duration = 360
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                tintLevel = it.animatedValue as Float
+                pillView.invalidate()
+            }
+            start()
+        }
+    }
+
     // ── Glow ────────────────────────────────────────────────────────────────
     private var glowColor = Color.WHITE
     private var glowLevel = 0f
@@ -524,16 +620,23 @@ class IslandView(context: Context) : FrameLayout(context) {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
                 val up = vy < -500 && abs(vy) > abs(vx)
                 val sideways = abs(vx) > 700 && abs(vx) > abs(vy)
-                if (up || sideways) {
+                if (up) {
                     performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
                     callbacks?.onSwipeUp()
+                    return true
+                }
+                if (sideways) {
+                    performHapticFeedback(HapticFeedbackConstants.GESTURE_END)
+                    callbacks?.onSwipeSideways(toLeft = vx < 0)
                     return true
                 }
                 return false
             }
         })
         setOnTouchListener { _, ev ->
-            if (ev.actionMasked == MotionEvent.ACTION_DOWN && !rect.contains(ev.x, ev.y)) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN && !rect.contains(ev.x, ev.y) &&
+                targetArea()?.contains(ev.x.toInt(), ev.y.toInt()) != true
+            ) {
                 return@setOnTouchListener false
             }
             when (ev.actionMasked) {
@@ -630,7 +733,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
 
     /** iOS-style Face ID: glyph breathes under the camera while scanning, then pops green. */
-    fun showFaceId(unlocked: Boolean) {
+    fun showFaceId(unlocked: Boolean, unlockedIcon: Int = R.drawable.ic_face_ok) {
         val wasFace = mode == Mode.STATUS && currentLayer === faceLayer
         mode = Mode.STATUS
         compactBars.playing = false
@@ -660,7 +763,8 @@ class IslandView(context: Context) : FrameLayout(context) {
                 start()
             }
         } else {
-            faceGlyph.setImageResource(R.drawable.ic_face_ok)
+            // Shows what unlocked the phone: face, fingerprint or PIN.
+            faceGlyph.setImageResource(unlockedIcon)
             faceGlyph.imageTintList = ColorStateList.valueOf(green)
             faceGlyph.alpha = 1f
             faceGlyph.scaleX = 0.6f; faceGlyph.scaleY = 0.6f
@@ -749,7 +853,12 @@ class IslandView(context: Context) : FrameLayout(context) {
         value: String,
         valueColor: Int,
     ) {
-        val replacing = mode == target || mode == Mode.STATUS || mode == Mode.LIVE
+        // Same pill already on screen (the island re-renders whenever anything
+        // changes, e.g. music moving to the earbuds): don't animate it again.
+        val onScreen = currentLayer === statusLayer && (mode == Mode.STATUS || mode == Mode.LIVE)
+        val sameTitle = onScreen && statusTitle.text.toString() == title
+        val unchanged = sameTitle && statusValue.text.toString() == value
+        val replacing = onScreen && !sameTitle
         mode = target
         compactBars.playing = false
         mediaBars.playing = false
@@ -779,36 +888,52 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
         setGlow(tint)
         setShown(true)
-        if (replacing) {
-            swapContent(statusLayer, fill)
-            kick()
-        } else {
-            fill()
+        when {
+            unchanged -> Unit
+            // a new event takes over the pill: old content blurs out, new blurs in
+            replacing -> {
+                swapContent(statusLayer, fill)
+                kick()
+            }
+            // same pill, new value (e.g. "Connected" → "86%"): just update it
+            else -> fill()
         }
         morph(w + stripW, h, h / 2f, statusLayer)
     }
 
-    fun showNotification(icon: Drawable?, title: String, text: String) {
-        val replacing = mode == Mode.NOTIFICATION
+    /**
+     * A notification grows out of the camera as a card. Its height follows the
+     * content: a one-line message makes a short card, a long one or an opened
+     * card with buttons a taller one.
+     */
+    fun showNotification(n: NotifEvent, expanded: Boolean, actions: List<Action>, controls: Boolean = false) {
+        val replacing = mode == Mode.NOTIFICATION && currentLayer === notifLayer && notifKey != n.key
         mode = Mode.NOTIFICATION
+        notifKey = n.key
         val clear = cameraClearance()
         val w = expandedWidth()
-        val h = dp(84) + clear
-        notifLayer.setPadding(dp(16), clear, dp(26), dp(12))
-        sizeLayer(notifLayer, w, h)
+        notifLayer.setPadding(dp(16), clear, dp(18), dp(if (expanded) 16 else 14))
+        // tap/long-press reshapes the same card: a quick spring nudge marks it
+        val reshaped = mode == Mode.NOTIFICATION && notifKey == n.key && (notifExpanded != expanded || notifControls != controls)
+        notifExpanded = expanded
+        notifControls = controls
         compactBars.playing = false
         mediaBars.playing = false
-        setGlow(null)
-        setShown(true)
+        val fill = { fillNotification(n, expanded, actions) }
         if (replacing) {
-            // A newer notification takes over: the old content blurs away,
-            // the new one blurs in, and the island gives a little kick.
-            swapContent(notifLayer) { fillNotification(icon, title, text) }
+            // A newer notification takes over: the new one blurs in and the island gives a little kick.
+            refill(notifLayer, fill)
             kick()
         } else {
-            fillNotification(icon, title, text)
+            fill()
         }
-        morph(w, h, dp(28).toFloat(), notifLayer)
+        val h = contentHeight(notifLayer, w)
+        sizeLayer(notifLayer, w, h)
+        setTint(n.accent)
+        setGlow(n.accent.takeIf { it != Color.WHITE })
+        setShown(true)
+        if (reshaped) performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        morph(w, h, dp(if (expanded) 34 else 30).toFloat(), notifLayer)
     }
 
     /**
@@ -834,19 +959,18 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     /** A card with suggestions, e.g. for a copied link: Open · Share. */
     fun showActions(badge: Int, tint: Int, kind: String, text: String, actions: List<Action>) {
-        val replacing = mode == Mode.ACTIONS
+        val contentKey = "$kind\u0000$text"
+        // A re-render of the card already on screen isn't a new card: no blur, no bounce.
+        val replacing = mode == Mode.ACTIONS && currentLayer === actionLayer && actionKey != contentKey
+        actionKey = contentKey
         mode = Mode.ACTIONS
         compactBars.playing = false
         mediaBars.playing = false
         val clear = cameraClearance()
         val w = expandedWidth()
-        val detailLines = text.length.coerceAtMost(240).let { ((it + 37) / 38).coerceIn(1, 5) }
         val hasActions = actions.isNotEmpty()
-        val contentHeight = dp(38 + 18 + detailLines * 20 + if (hasActions) 58 else 0)
-        val h = contentHeight + clear + dp(26)
-        actionLayer.setPadding(dp(20), clear + dp(14), dp(20), dp(12))
+        actionLayer.setPadding(dp(20), clear + dp(4), dp(20), dp(14))
         actionRow.visibility = if (hasActions) VISIBLE else GONE
-        sizeLayer(actionLayer, w, h)
         val fill = {
             actionBadge.setImageResource(badge)
             actionBadge.imageTintList = ColorStateList.valueOf(Color.WHITE)
@@ -856,15 +980,19 @@ class IslandView(context: Context) : FrameLayout(context) {
             actionRow.removeAllViews()
             for (a in actions.take(4)) actionRow.addView(actionButton(a), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         }
-        setGlow(tint)
-        setShown(true)
         if (replacing) {
-            swapContent(actionLayer, fill)
+            refill(actionLayer, fill)
             kick()
         } else {
             fill()
         }
-        morph(w, h, dp(40).toFloat(), actionLayer)
+        // Sized to what's in it: a short link is a short card.
+        val h = contentHeight(actionLayer, w)
+        sizeLayer(actionLayer, w, h)
+        setTint(tint)
+        setGlow(tint)
+        setShown(true)
+        morph(w, h, dp(36).toFloat(), actionLayer)
     }
 
     /** Something is being dragged: the island invites the drop, and grows when it's over it. */
@@ -895,6 +1023,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         sizeLayer(mediaLayer, w, h)
         updateMediaContent(m)
         compactBars.playing = false
+        setTint(m.accent)
         setGlow(m.accent, pulsing = m.playing)
         setShown(true)
         morph(w, h, dp(46).toFloat(), mediaLayer)
@@ -922,20 +1051,65 @@ class IslandView(context: Context) : FrameLayout(context) {
      * camera cut-out instead of drawing through it.
      */
     private fun cameraClearance(): Int {
-        if (geometry.holeW <= 0) return dp(6)
-        // Keep expanded content below the entire camera / compact-pill area.
-        // A number of phones report a cut-out smaller than the visible camera
-        // band, so half-height clearance still lets text fall behind the lens.
-        return max(geometry.holeH, compactH()) + dp(12)
+        if (geometry.holeW <= 0) return dp(14)
+        // The card's top edge is the compact pill's top edge and the camera sits
+        // in the middle of that pill: start the content just under the lens
+        // (with a little room for phones whose cut-out is reported a bit small).
+        return compactH() / 2 + geometry.holeH / 2 + dp(10)
     }
 
     private fun cornerRadius() = min(sr.value * sPress.value, rect.height() / 2f)
 
-    private fun fillNotification(icon: Drawable?, title: String, text: String) {
-        notifIcon.setImageDrawable(icon ?: context.getDrawable(R.mipmap.ic_launcher))
-        notifTitle.text = title
-        notifText.text = text
-        notifText.visibility = if (text.isEmpty()) GONE else VISIBLE
+    private fun fillNotification(n: NotifEvent, expanded: Boolean, actions: List<Action>) {
+        val photo = n.icon
+        val app = n.appIcon ?: context.getDrawable(R.mipmap.ic_launcher)
+        if (photo != null) {
+            // Sender's photo with the app's icon on its corner.
+            notifIcon.setImageDrawable(photo)
+            notifBadge.setImageDrawable(app)
+            notifBadge.visibility = VISIBLE
+        } else {
+            notifIcon.setImageDrawable(app)
+            notifBadge.visibility = GONE
+        }
+        notifTitle.text = n.title
+        notifApp.text = n.appName.takeIf { it.isNotBlank() && it != n.title }.orEmpty()
+        notifApp.visibility = if (notifApp.text.isNullOrEmpty()) GONE else VISIBLE
+        notifApp.maxWidth = dp(110)
+        notifText.text = n.text
+        notifText.maxLines = if (expanded) 8 else 2
+        notifText.visibility = if (n.text.isEmpty()) GONE else VISIBLE
+        notifActions.removeAllViews()
+        if (expanded && actions.isNotEmpty()) {
+            for ((i, a) in actions.take(4).withIndex()) {
+                val primary = i == actions.lastIndex && actions.size > 0 && a.label == "Open"
+                notifActions.addView(
+                    chipButton(a, primary),
+                    LinearLayout.LayoutParams(0, dp(38), 1f).apply { if (i > 0) marginStart = dp(8) },
+                )
+            }
+            notifActions.visibility = VISIBLE
+        } else {
+            notifActions.visibility = GONE
+        }
+    }
+
+    /** Height of [layer] laid out at width [w] with its current content. */
+    private fun contentHeight(layer: View, w: Int): Int {
+        layer.measure(
+            MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+        )
+        return max(layer.measuredHeight, compactH() + dp(24))
+    }
+
+    /** Swap in new content: it blurs in from nothing so old and new never mix. */
+    private fun refill(layer: View, update: () -> Unit) {
+        layerAnims.remove(layer)?.cancel()
+        fadeLevel[layer] = 0f
+        update()
+        currentLayer = layer
+        fade(layer, show = true, delay = 40)
     }
 
     private fun updateMediaContent(m: MediaState) {
@@ -984,7 +1158,7 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun statusWidth() = min(expandedWidth(), statusGapWidth() + dp(2 * 98 + 28))
 
-    private fun expandedWidth() = min(resources.displayMetrics.widthPixels - dp(20), dp(420))
+    private fun expandedWidth() = min(resources.displayMetrics.widthPixels - dp(28), dp(400))
 
     private fun sizeLayer(layer: View, w: Int, h: Int) {
         val lp = layer.layoutParams
@@ -996,6 +1170,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
 
     private fun morph(w: Int, h: Int, r: Float, layer: View?) {
+        if (layer !== notifLayer && layer !== actionLayer && layer !== mediaLayer) setTint(null)
         if (layer !== currentLayer) swapContent(layer, null)
 
         val first = sw.value == 0f
@@ -1024,7 +1199,9 @@ class IslandView(context: Context) : FrameLayout(context) {
             onSettled()
             return
         }
-        callbacks?.onTouchArea(null) // until it settles in its new shape
+        // Take touches where the island is going, straight away: waiting for the
+        // spring to settle made taps in the first second fall through to the app below.
+        callbacks?.onTouchArea(targetArea())
         start()
     }
 
@@ -1047,6 +1224,15 @@ class IslandView(context: Context) : FrameLayout(context) {
         Choreographer.getInstance().postFrameCallback(frame)
     }
 
+    private fun targetArea(): Rect? {
+        if (idleHidden || !shown) return null
+        val w = sw.target
+        val h = sh.target
+        val left = geometry.anchorX - w / 2f
+        val top = topFor(h, compactH().toFloat()) + glowPad
+        return Rect(left.toInt(), top.toInt(), ceil(left + w).toInt(), ceil(top + h).toInt())
+    }
+
     private fun onSettled() {
         if (!shown) alpha = 0f
         val area = if (idleHidden || !shown) null else Rect(
@@ -1067,7 +1253,8 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun redraw() {
         val ps = sPress.value
-        val w = sw.value * ps
+        val maxW = (if (geometry.screenW > 0) geometry.screenW else resources.displayMetrics.widthPixels) - dp(12).toFloat()
+        val w = min(sw.value * ps, maxW)
         val h = sh.value * ps
         val ch = compactH().toFloat()
         // the window spans the screen width, so window x == screen x
@@ -1252,6 +1439,28 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /** A rounded text button for an opened notification ("Mark as read", "Pause", "Open"). */
+    private fun chipButton(a: Action, primary: Boolean) = TextView(context).apply {
+        text = a.label
+        textSize = 13f
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        includeFontPadding = false
+        typeface = IslandFonts.medium
+        setPadding(dp(10), 0, dp(10), 0)
+        val shape = GradientDrawable().apply {
+            cornerRadius = dp(19).toFloat()
+            setColor(if (primary) blue else 0x33FFFFFF)
+        }
+        background = RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), shape, null)
+        setOnClickListener {
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            a.run()
+        }
+    }
+
     private fun fmt(ms: Long): String {
         val s = (ms.coerceAtLeast(0) / 1000)
         return "%d:%02d".format(s / 60, s % 60)
@@ -1264,7 +1473,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             maxLines = lines
             ellipsize = TextUtils.TruncateAt.END
             includeFontPadding = false
-            if (bold) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = if (bold) IslandFonts.medium else IslandFonts.regular
         }
 
     private fun iconButton(res: Int, sizeDp: Int, onClick: () -> Unit) = ImageView(context).apply {
@@ -1297,6 +1506,17 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
         clipToOutline = true
     }
+}
+
+/**
+ * The island uses the phone's own font, so it changes with the font picked in
+ * the phone's theme settings. Typeface.DEFAULT is what theme fonts replace;
+ * named families like "sans-serif-medium" often aren't, which made the
+ * island's titles look different from the rest of the phone.
+ */
+private object IslandFonts {
+    val regular: Typeface get() = Typeface.DEFAULT
+    val medium: Typeface get() = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
 }
 
 /**

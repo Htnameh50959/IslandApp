@@ -45,6 +45,7 @@ class IslandNotificationListener : NotificationListenerService() {
         MediaSessionManager.OnActiveSessionsChangedListener { refreshSessions(it) }
 
     override fun onListenerConnected() {
+        IslandBus.notificationsConnected = true
         IslandBus.canceller = { key -> runCatching { cancelNotification(key) } }
         sessionManager = getSystemService(MediaSessionManager::class.java)
         try {
@@ -55,7 +56,11 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        IslandBus.notificationsConnected = false
         IslandBus.canceller = null
+        // Some phones (vivo, Xiaomi…) unbind the listener in the background, and
+        // then notifications silently stop reaching the island. Ask to come back.
+        runCatching { requestRebind(component) }
         runCatching { sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(mediaCallback)
         controller = null
@@ -149,16 +154,23 @@ class IslandNotificationListener : NotificationListenerService() {
             if (!ranking.matchesInterruptionFilter()) return
         }
 
-        val extras = n.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
-            .orEmpty().ifEmpty { appLabel(sbn.packageName) }
-        val text = (extras.getCharSequence(Notification.EXTRA_TEXT)
-            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT))?.toString()?.trim().orEmpty()
+        val appName = appLabel(sbn.packageName)
+        val (rawTitle, text) = titleAndText(n)
+        val title = rawTitle.ifEmpty { appName }
+        if (title.isBlank() && text.isBlank()) return
 
         // Skip silent re-posts of the same content (progress updates, re-sorts, …).
+        // A chat app re-posting the same key with a new message is a new pop-up even
+        // if the words repeat ("ok", "ok"): `when` moves on for each new message.
         // Live activities re-post often (elapsed time); refresh when the text changes.
-        val signature = "$title\u0000$text\u0000$kind"
-        if (lastContent[sbn.key] == signature) return
+        val signature = "$title\u0000$text\u0000$kind" + if (live) "" else "\u0000${n.`when`}"
+        val previous = lastContent[sbn.key]
+        if (previous == signature) return
+        // The app asked Android to alert only the first time: updates stay quiet.
+        if (previous != null && !live && n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0) {
+            lastContent[sbn.key] = signature
+            return
+        }
         if (lastContent.size > 300) lastContent.clear()
         lastContent[sbn.key] = signature
 
@@ -168,11 +180,15 @@ class IslandNotificationListener : NotificationListenerService() {
                 packageName = sbn.packageName,
                 title = title,
                 text = text,
-                icon = loadIcon(sbn),
+                icon = largeIcon(sbn),
                 contentIntent = n.contentIntent,
                 autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
                 isLiveActivity = live,
                 liveKind = kind,
+                appIcon = appIcon(sbn.packageName),
+                appName = appName,
+                actions = actionsOf(n),
+                accent = appAccent(sbn.packageName),
             )
         )
 
@@ -217,6 +233,7 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private companion object {
+        val WHITESPACE = Regex("\\s*\\n\\s*")
         val TIMER_RE = Regex("\\b(timer|stopwatch|countdown)\\b", RegexOption.IGNORE_CASE)
         val NAV_RE = Regex(
             "\\b(navigation|navigating|turn left|turn right|arriving|destination|rerouting)\\b",
@@ -266,11 +283,72 @@ class IslandNotificationListener : NotificationListenerService() {
         player.setOnCompletionListener { player.release() }
     }
 
-    private fun loadIcon(sbn: StatusBarNotification): Drawable? {
-        sbn.notification.getLargeIcon()?.let { icon ->
-            runCatching { icon.loadDrawable(this) }.getOrNull()?.let { return it }
+    /**
+     * Title and text as the shade shows them. Chat apps (MessagingStyle) keep the
+     * newest message in EXTRA_MESSAGES, and EXTRA_TEXT is often a summary such as
+     * "3 new messages" there, so read the last message instead.
+     */
+    private fun titleAndText(n: Notification): Pair<String, String> {
+        val x = n.extras
+        var title = (x.getCharSequence(Notification.EXTRA_TITLE_BIG)
+            ?: x.getCharSequence(Notification.EXTRA_TITLE))?.toString()?.trim().orEmpty()
+        var text = (x.getCharSequence(Notification.EXTRA_TEXT)
+            ?: x.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?: x.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.lastOrNull()
+            ?: x.getCharSequence(Notification.EXTRA_SUB_TEXT))?.toString()?.trim().orEmpty()
+
+        @Suppress("DEPRECATION")
+        val last = runCatching { x.getParcelableArray(Notification.EXTRA_MESSAGES) }.getOrNull()
+            ?.lastOrNull() as? android.os.Bundle
+        if (last != null) {
+            val msg = last.getCharSequence("text")?.toString()?.trim().orEmpty()
+            @Suppress("DEPRECATION")
+            val sender = (last.getCharSequence("sender")
+                ?: runCatching { last.getParcelable<android.app.Person>("sender_person")?.name }.getOrNull())
+                ?.toString()?.trim().orEmpty()
+            val conversation = x.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim().orEmpty()
+            val group = x.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) || conversation.isNotEmpty()
+            if (msg.isNotEmpty()) {
+                if (group && sender.isNotEmpty()) {
+                    title = conversation.ifEmpty { title }
+                    text = "$sender: $msg"
+                } else {
+                    if (sender.isNotEmpty() && title.isEmpty()) title = sender
+                    text = msg
+                }
+            }
         }
-        return runCatching { packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
+        return title to text.replace(WHITESPACE, " ")
+    }
+
+    /** The notification's own buttons, except reply fields (those need typing, so open the app). */
+    private fun actionsOf(n: Notification): List<NotifAction> =
+        n.actions.orEmpty().filter { a ->
+            a.actionIntent != null && !a.title.isNullOrBlank() && a.remoteInputs.isNullOrEmpty()
+        }.take(3).map { NotifAction(it.title.toString().trim(), it.actionIntent) }
+
+    /** The sender's photo or picture (null when the notification has none). */
+    private fun largeIcon(sbn: StatusBarNotification): Drawable? =
+        sbn.notification.getLargeIcon()?.let { icon -> runCatching { icon.loadDrawable(this) }.getOrNull() }
+
+    private val iconCache = HashMap<String, Drawable?>()
+    private val accentCache = HashMap<String, Int>()
+
+    private fun appAccent(pkg: String): Int = accentCache.getOrPut(pkg) {
+        val d = appIcon(pkg) ?: return@getOrPut Color.WHITE
+        runCatching {
+            val bmp = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            val old = d.copyBounds()
+            d.setBounds(0, 0, 24, 24)
+            d.draw(c)
+            d.bounds = old
+            accentOf(bmp)
+        }.getOrDefault(Color.WHITE)
+    }
+
+    private fun appIcon(pkg: String): Drawable? = iconCache.getOrPut(pkg) {
+        runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
     }
 
     private fun appLabel(pkg: String): String = runCatching {

@@ -1,6 +1,6 @@
 <resources>
     <string name="app_name">Island</string>
-    <string name="tagline">A living pill around your camera. Music, live calls, navigation, timers, hotspot devices, notifications, copied links and more pop out of it.</string>
+    <string name="tagline">Lives around your camera.</string>
     <string name="a11y_description">Island uses this permission to draw the floating island at the top of the screen and, if Copy suggestions is on, to notice when you copy text so it can offer to open a link, call a number or write an email. Copied text stays on your phone: it is never stored or sent anywhere.</string>
-    <string name="restricted_hint">Can\'t turn on the accessibility service? On Android 13+ sideloaded apps are restricted. Open Settings › Apps › Island, tap ⋮ (top right), choose \"Allow restricted settings\", then try again.</string>
+    <string name="restricted_hint">If Android won\'t let you turn Island on: Settings › Apps › Island › ⋮ › Allow restricted settings, then try again.</string>
 </resources>

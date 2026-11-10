@@ -44,6 +44,10 @@
         </intent>
     </queries>
 
+    <!-- Hand copied text to Notify Bridge for clipboard sync with the computer
+         (a signature permission: only Notify Bridge built with the same key gets it). -->
+    <uses-permission android:name="com.notifybridge.permission.CLIPBOARD" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

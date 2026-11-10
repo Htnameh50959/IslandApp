@@ -1,262 +1,274 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scroll"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:clipToPadding="false">
 
     <LinearLayout
+        android:id="@+id/content"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingStart="20dp"
-        android:paddingTop="88dp"
-        android:paddingEnd="20dp"
-        android:paddingBottom="56dp">
+        android:paddingStart="16dp"
+        android:paddingTop="72dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="40dp">
 
         <TextView style="@style/Title" android:text="@string/app_name" />
         <TextView style="@style/Body" android:text="@string/tagline" />
 
-        <!-- ───────── Setup ───────── -->
         <TextView style="@style/Section" android:text="Setup" />
         <LinearLayout style="@style/Card">
-
             <LinearLayout style="@style/Row">
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-                    <TextView style="@style/RowTitle" android:text="1 · Show the island" />
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_pill" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Island service" />
                     <TextView android:id="@+id/statusA11y" style="@style/RowSub" />
                 </LinearLayout>
-                <Button android:id="@+id/btnA11y" style="@style/PillButton" android:text="Enable" />
+                <Button android:id="@+id/btnA11y" style="@style/RowButton" android:text="Turn on" />
             </LinearLayout>
-
             <View style="@style/Divider" />
-
             <LinearLayout style="@style/Row">
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-                    <TextView style="@style/RowTitle" android:text="2 · Notifications &amp; music" />
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Notifications &amp; music" />
                     <TextView android:id="@+id/statusNotif" style="@style/RowSub" />
                 </LinearLayout>
-                <Button android:id="@+id/btnNotif" style="@style/PillButton" android:text="Enable" />
+                <Button android:id="@+id/btnNotif" style="@style/RowButton" android:text="Turn on" />
             </LinearLayout>
-
             <View style="@style/Divider" />
-
             <LinearLayout style="@style/Row">
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-                    <TextView style="@style/RowTitle" android:text="3 · Earbuds pop-ups" />
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bluetooth" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Earbuds" />
                     <TextView android:id="@+id/statusBt" style="@style/RowSub" />
                 </LinearLayout>
-                <Button android:id="@+id/btnBt" style="@style/PillButton" android:text="Allow" />
+                <Button android:id="@+id/btnBt" style="@style/RowButton" android:text="Turn on" />
             </LinearLayout>
-
-            <View style="@style/Divider" />
-            <TextView style="@style/Hint" android:text="@string/restricted_hint" />
         </LinearLayout>
-
-        <!-- ───────── Camera & position ───────── -->
-        <TextView style="@style/Section" android:text="Camera &amp; position" />
+        <TextView style="@style/Footer" android:text="@string/restricted_hint" />
+        <TextView style="@style/Section" android:text="Camera" />
         <LinearLayout style="@style/Card">
-
-            <Switch android:id="@+id/swFit" style="@style/SwitchRow" android:text="Find my camera automatically" />
-            <TextView android:id="@+id/fitInfo" style="@style/RowSub" android:paddingBottom="8dp" />
-            <View style="@style/Divider" />
-
             <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move up or down" />
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_camera" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Find camera automatically" />
+                </LinearLayout>
+                <Switch android:id="@+id/swFit" style="@style/RowSwitch" android:contentDescription="Find camera automatically" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Footer" android:id="@+id/fitInfo" />
+        <LinearLayout style="@style/Card" android:layout_marginTop="14dp">
+            <LinearLayout style="@style/Row" android:minHeight="44dp">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Up and down" />
                 <TextView android:id="@+id/valY" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekY" style="@style/Seek" />
-
-            <LinearLayout style="@style/Row">
-                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Move left or right" />
+            <View style="@style/Divider.Full" />
+            <LinearLayout style="@style/Row" android:minHeight="44dp">
+                <TextView style="@style/RowTitle" android:layout_width="0dp" android:layout_weight="1" android:text="Left and right" />
                 <TextView android:id="@+id/valX" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekX" style="@style/Seek" />
         </LinearLayout>
-
-        <!-- ───────── Features ───────── -->
-        <TextView style="@style/Section" android:text="Features" />
+        <TextView style="@style/Section" android:text="Island" />
         <LinearLayout style="@style/Card">
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Island enabled" />
-                    <TextView style="@style/RowSub" android:text="Master switch for the floating island" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_pill" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Show the island" />
                 </LinearLayout>
-                <Switch android:id="@+id/swEnabled" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Music playback" />
-                    <TextView style="@style/RowSub" android:text="Shows music information and playback activity" />
-                </LinearLayout>
-                <Switch android:id="@+id/swMedia" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Timer &amp; stopwatch" />
-                    <TextView style="@style/RowSub" android:text="Displays running timer / stopwatch status" />
-                </LinearLayout>
-                <Switch android:id="@+id/swLiveActivities" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Navigation" />
-                    <TextView style="@style/RowSub" android:text="Shows live navigation information" />
-                </LinearLayout>
-                <Switch android:id="@+id/swNavigation" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Call status" />
-                    <TextView style="@style/RowSub" android:text="Can show ongoing system activity" />
-                </LinearLayout>
-                <Switch android:id="@+id/swCall" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Copy &amp; Go" />
-                    <TextView style="@style/RowSub" android:text="Recognises copied text and suggests actions" />
-                </LinearLayout>
-                <Switch android:id="@+id/swCopy" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Drag &amp; Go" />
-                    <TextView style="@style/RowSub" android:text="Drag images or text to the island to share or open them" />
-                </LinearLayout>
-                <Switch android:id="@+id/swDrop" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Smart suggestions" />
-                    <TextView style="@style/RowSub" android:text="Recommends apps based on the content you\u2019re handling" />
-                </LinearLayout>
-                <Switch android:id="@+id/swSuggestions" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Stop system notifications" />
-                    <TextView style="@style/RowSub" android:text="Hide shade banners so notifications only come through the Island" />
-                </LinearLayout>
-                <Switch android:id="@+id/swRouteNotifications" style="@style/FeatureSwitch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Pop-out notifications" />
-                    <TextView style="@style/RowSub" android:text="Show incoming notifications in the Island" />
-                </LinearLayout>
-                <Switch android:id="@+id/swNotif" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swEnabled" style="@style/RowSwitch" android:contentDescription="Show the island" />
             </LinearLayout>
         </LinearLayout>
-
-        <!-- ───────── More ───────── -->
-        <TextView style="@style/Section" android:text="More" />
+        <TextView style="@style/Section" android:text="Live activities" />
         <LinearLayout style="@style/Card">
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Show pill when idle" />
-                    <TextView style="@style/RowSub" android:text="Keep a small island over the camera when nothing is active" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_music" android:backgroundTint="@color/t_pink" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Music" />
+                    <TextView style="@style/RowSub" android:text="Album art, bars and controls" />
                 </LinearLayout>
-                <Switch android:id="@+id/swIdle" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swMedia" style="@style/RowSwitch" android:contentDescription="Music" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_play" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
                     <TextView style="@style/RowTitle" android:text="Videos" />
-                    <TextView style="@style/RowSub" android:text="YouTube and other video apps when you leave the app" />
+                    <TextView style="@style/RowSub" android:text="After you leave YouTube and others" />
                 </LinearLayout>
-                <Switch android:id="@+id/swVideo" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swVideo" style="@style/RowSwitch" android:contentDescription="Videos" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Charging indicator" />
-                    <TextView style="@style/RowSub" android:text="Battery level when you plug in" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Timer &amp; stopwatch" />
                 </LinearLayout>
-                <Switch android:id="@+id/swCharging" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swLiveActivities" style="@style/RowSwitch" android:contentDescription="Timer &amp; stopwatch" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Status pop-ups" />
-                    <TextView style="@style/RowSub" android:text="Earbuds, silent mode and Do Not Disturb" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_nav" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Navigation" />
                 </LinearLayout>
-                <Switch android:id="@+id/swStatus" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swNavigation" style="@style/RowSwitch" android:contentDescription="Navigation" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Hotspot devices" />
-                    <TextView style="@style/RowSub" android:text="Show personal hotspot on and how many devices are connected" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_phone" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Calls" />
                 </LinearLayout>
-                <Switch android:id="@+id/swHotspot" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swCall" style="@style/RowSwitch" android:contentDescription="Calls" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Face ID animation" />
-                    <TextView style="@style/RowSub" android:text="Only while face unlock is checking on the lock screen" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_hotspot" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Hotspot" />
+                    <TextView style="@style/RowSub" android:text="Connected devices" />
                 </LinearLayout>
-                <Switch android:id="@+id/swFaceId" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swHotspot" style="@style/RowSwitch" android:contentDescription="Hotspot" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Glow" />
-                    <TextView style="@style/RowSub" android:text="Soft coloured light around the island" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_battery" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Charging" />
                 </LinearLayout>
-                <Switch android:id="@+id/swGlow" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swCharging" style="@style/RowSwitch" android:contentDescription="Charging" />
             </LinearLayout>
             <View style="@style/Divider" />
-            <LinearLayout style="@style/FeatureRow">
-                <LinearLayout style="@style/FeatureText">
-                    <TextView style="@style/RowTitle" android:text="Hide in landscape" />
-                    <TextView style="@style/RowSub" android:text="Hide the island when the phone is sideways" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_headphones" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Earbuds &amp; sound modes" />
+                    <TextView style="@style/RowSub" android:text="Connected, silent, Do Not Disturb" />
                 </LinearLayout>
-                <Switch android:id="@+id/swLandscape" style="@style/FeatureSwitch" />
+                <Switch android:id="@+id/swStatus" style="@style/RowSwitch" android:contentDescription="Earbuds &amp; sound modes" />
             </LinearLayout>
         </LinearLayout>
-
-        <!-- ───────── Try it ───────── -->
+        <TextView style="@style/Section" android:text="Notifications" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Pop out of the island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swNotif" style="@style/RowSwitch" android:contentDescription="Pop out of the island" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell_off" android:backgroundTint="@color/t_grey" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Only in the island" />
+                    <TextView style="@style/RowSub" android:text="Hide the system banners" />
+                </LinearLayout>
+                <Switch android:id="@+id/swRouteNotifications" style="@style/RowSwitch" android:contentDescription="Only in the island" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Copy &amp; share" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_copy" android:backgroundTint="@color/t_indigo" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Copy &amp; Go" />
+                    <TextView style="@style/RowSub" android:text="Actions for copied links, numbers, text" />
+                </LinearLayout>
+                <Switch android:id="@+id/swCopy" style="@style/RowSwitch" android:contentDescription="Copy &amp; Go" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_search" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Smart suggestions" />
+                    <TextView style="@style/RowSub" android:text="Use the apps that fit" />
+                </LinearLayout>
+                <Switch android:id="@+id/swSuggestions" style="@style/RowSwitch" android:contentDescription="Smart suggestions" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_drop" android:backgroundTint="@color/t_teal" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Drag &amp; Go" />
+                    <TextView style="@style/RowSub" android:text="Drop text or photos on the top edge" />
+                </LinearLayout>
+                <Switch android:id="@+id/swDrop" style="@style/RowSwitch" android:contentDescription="Drag &amp; Go" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Look" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_face_scan" android:backgroundTint="@color/t_indigo" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Unlock animation" />
+                    <TextView style="@style/RowSub" android:text="Face, fingerprint or PIN" />
+                </LinearLayout>
+                <Switch android:id="@+id/swFaceId" style="@style/RowSwitch" android:contentDescription="Unlock animation" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bolt" android:backgroundTint="@color/t_yellow" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Glow" />
+                    <TextView style="@style/RowSub" android:text="Soft colour around the island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swGlow" style="@style/RowSwitch" android:contentDescription="Glow" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_moon" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Keep a pill when idle" />
+                </LinearLayout>
+                <Switch android:id="@+id/swIdle" style="@style/RowSwitch" android:contentDescription="Keep a pill when idle" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_rotate" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Hide in landscape" />
+                </LinearLayout>
+                <Switch android:id="@+id/swLandscape" style="@style/RowSwitch" android:contentDescription="Hide in landscape" />
+            </LinearLayout>
+        </LinearLayout>
         <TextView style="@style/Section" android:text="Try it" />
-        <Button android:id="@+id/btnPreview" style="@style/WideButton" android:text="Preview a pop-out" />
-        <Button android:id="@+id/btnFaceId" style="@style/WideButton.Secondary" android:text="Preview Face ID" />
-        <Button android:id="@+id/btnTest" style="@style/WideButton.Secondary" android:text="Send a real test notification" />
-        <Button android:id="@+id/btnReset" style="@style/WideButton.Secondary" android:text="Reset to defaults" />
-
-        <TextView
-            style="@style/Hint"
-            android:layout_marginTop="18dp"
-            android:gravity="center"
-            android:text="Tap the island to expand · Long-press for music · Swipe up to dismiss" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout android:id="@+id/btnPreview" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_play" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Preview a pop-out" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnFaceId" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_face_ok" android:backgroundTint="@color/t_indigo" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Preview unlock" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnTest" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Send a test notification" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout style="@style/Card" android:layout_marginTop="14dp">
+            <LinearLayout android:id="@+id/btnReset" style="@style/Row.Tappable">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/danger" android:text="Reset to defaults" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Footer" android:text="Tap to expand, tap again to open. Long-press for controls. Swipe up to dismiss, sideways for the next one." android:layout_marginTop="14dp" />
     </LinearLayout>
 </ScrollView>

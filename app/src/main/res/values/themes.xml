@@ -2,37 +2,47 @@
     <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:colorPrimary">#0A84FF</item>
-        <item name="android:windowBackground">@drawable/glass_bg</item>
+        <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 
+    <!-- Grouped settings, the way the system does it: big title, plain
+         section names, solid groups, rows with a coloured icon tile. -->
     <style name="Title">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:textSize">38sp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:textSize">34sp</item>
         <item name="android:textStyle">bold</item>
-        <item name="android:letterSpacing">-0.02</item>
         <item name="android:textColor">@color/text</item>
     </style>
     <style name="Body">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginTop">2dp</item>
         <item name="android:textSize">15sp</item>
         <item name="android:textColor">@color/text2</item>
-        <item name="android:lineSpacingExtra">3dp</item>
     </style>
     <style name="Section">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">28dp</item>
-        <item name="android:layout_marginBottom">10dp</item>
-        <item name="android:layout_marginStart">6dp</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:textAllCaps">true</item>
-        <item name="android:letterSpacing">0.08</item>
+        <item name="android:layout_marginTop">26dp</item>
+        <item name="android:layout_marginBottom">7dp</item>
+        <item name="android:layout_marginStart">16dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/text2</item>
+    </style>
+    <style name="Footer">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">7dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
         <item name="android:textColor">@color/text2</item>
     </style>
     <style name="Card">
@@ -40,11 +50,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:background">@drawable/card</item>
-        <item name="android:paddingStart">18dp</item>
-        <item name="android:paddingEnd">18dp</item>
-        <item name="android:paddingTop">8dp</item>
-        <item name="android:paddingBottom">8dp</item>
-        <item name="android:elevation">0dp</item>
+        <item name="android:clipToOutline">true</item>
     </style>
     <style name="Row">
         <item name="android:layout_width">match_parent</item>
@@ -52,8 +58,31 @@
         <item name="android:orientation">horizontal</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:minHeight">52dp</item>
-        <item name="android:paddingTop">6dp</item>
-        <item name="android:paddingBottom">6dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+    </style>
+    <style name="Row.Tappable">
+        <item name="android:background">@drawable/row_bg</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+    <style name="RowIcon">
+        <item name="android:layout_width">30dp</item>
+        <item name="android:layout_height">30dp</item>
+        <item name="android:layout_marginEnd">14dp</item>
+        <item name="android:padding">6dp</item>
+        <item name="android:background">@drawable/tile</item>
+        <item name="android:tint">#FFFFFF</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+    <style name="RowText">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingTop">11dp</item>
+        <item name="android:paddingBottom">11dp</item>
+        <item name="android:paddingEnd">12dp</item>
     </style>
     <style name="RowTitle">
         <item name="android:layout_width">wrap_content</item>
@@ -64,7 +93,7 @@
     <style name="RowSub">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:layout_marginTop">1dp</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textColor">@color/text2</item>
     </style>
@@ -75,73 +104,51 @@
         <item name="android:textColor">@color/text2</item>
         <item name="android:fontFeatureSettings">tnum</item>
     </style>
+    <style name="RowSwitch">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:thumb">@drawable/switch_thumb</item>
+        <item name="android:track">@drawable/switch_track</item>
+        <item name="android:switchMinWidth">50dp</item>
+        <item name="android:showText">false</item>
+        <item name="android:background">@null</item>
+    </style>
+    <style name="Chevron">
+        <item name="android:layout_width">8dp</item>
+        <item name="android:layout_height">14dp</item>
+        <item name="android:src">@drawable/ic_chevron</item>
+    </style>
     <style name="Seek">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingBottom">10dp</item>
-    </style>
-    <style name="SwitchRow">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">52dp</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textColor">@color/text</item>
-    </style>
-    <style name="FeatureRow">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:orientation">horizontal</item>
-        <item name="android:gravity">center_vertical</item>
-        <item name="android:minHeight">64dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingBottom">10dp</item>
-    </style>
-    <style name="FeatureText">
-        <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_weight">1</item>
-        <item name="android:orientation">vertical</item>
-        <item name="android:paddingEnd">12dp</item>
-    </style>
-    <style name="FeatureSwitch">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:minHeight">0dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:paddingBottom">14dp</item>
+        <item name="android:progressTint">@color/accent</item>
+        <item name="android:thumbTint">#FFFFFF</item>
+        <item name="android:progressBackgroundTint">@color/text2</item>
     </style>
     <style name="Divider">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_height">0.6dp</item>
+        <item name="android:layout_marginStart">60dp</item>
         <item name="android:background">@color/divider</item>
     </style>
-    <style name="PillButton" parent="android:Widget.Material.Button">
+    <style name="Divider.Full">
+        <item name="android:layout_marginStart">16dp</item>
+    </style>
+    <!-- small action in a row: filled when it needs doing, plain when it's done -->
+    <style name="RowButton" parent="android:Widget.Material.Button.Borderless">
         <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">36dp</item>
+        <item name="android:layout_height">32dp</item>
         <item name="android:minHeight">0dp</item>
-        <item name="android:minWidth">88dp</item>
-        <item name="android:paddingStart">18dp</item>
-        <item name="android:paddingEnd">18dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
         <item name="android:background">@drawable/btn_primary</item>
         <item name="android:textColor">#FFFFFF</item>
         <item name="android:textAllCaps">false</item>
-        <item name="android:textSize">15sp</item>
+        <item name="android:textSize">14sp</item>
         <item name="android:stateListAnimator">@null</item>
-    </style>
-    <style name="WideButton" parent="PillButton">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">50dp</item>
-        <item name="android:layout_marginTop">10dp</item>
-        <item name="android:textSize">16sp</item>
-    </style>
-    <style name="WideButton.Secondary">
-        <item name="android:background">@drawable/btn_secondary</item>
-    </style>
-    <style name="Hint">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingTop">8dp</item>
-        <item name="android:paddingBottom">10dp</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:textColor">@color/text2</item>
-        <item name="android:lineSpacingExtra">2dp</item>
     </style>
 </resources>
