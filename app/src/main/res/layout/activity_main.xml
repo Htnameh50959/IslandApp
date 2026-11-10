@@ -166,7 +166,7 @@
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell_off" android:backgroundTint="@color/t_grey" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
                     <TextView style="@style/RowTitle" android:text="Only in the island" />
-                    <TextView style="@style/RowSub" android:text="Hide the system banners" />
+                    <TextView style="@style/RowSub" android:text="Hide the system banners. Notifications stay in the notification panel" />
                 </LinearLayout>
                 <Switch android:id="@+id/swRouteNotifications" style="@style/RowSwitch" android:contentDescription="Only in the island" />
             </LinearLayout>

@@ -53,7 +53,10 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         IslandBus.notificationsConnected = true
-        IslandBus.canceller = { key -> runCatching { cancelNotification(key) } }
+        IslandBus.canceller = { key ->
+            runCatching { cancelNotification(key) }
+            ShadeCopy.cancel(this, key)
+        }
         sessionManager = getSystemService(MediaSessionManager::class.java)
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsListener)
         try {
@@ -145,6 +148,7 @@ class IslandNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) {
         sbn ?: return
         val n = sbn.notification ?: return
+        if (ShadeCopy.isCopy(this, sbn)) return // our own quiet copy in the panel
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return // music is shown by the player
 
@@ -211,9 +215,13 @@ class IslandNotificationListener : NotificationListenerService() {
 
         // A notification listener cannot suppress protected system UI (including calls),
         // but it can remove normal, clearable app notifications once the Island has them.
+        // That also takes them out of the panel, so a quiet copy is put back there.
         if (!live && sbn.isClearable && Prefs.get(this).getBoolean(Prefs.ROUTE_NOTIFICATIONS, false)) {
             routedKeys += sbn.key
-            mainHandler.post { runCatching { cancelNotification(sbn.key) } }
+            mainHandler.post {
+                runCatching { cancelNotification(sbn.key) }
+                ShadeCopy.post(this, sbn, appName, title, text)
+            }
         }
     }
 
