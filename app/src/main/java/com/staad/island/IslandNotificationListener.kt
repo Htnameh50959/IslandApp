@@ -191,7 +191,13 @@ class IslandNotificationListener : NotificationListenerService() {
         if (lastContent.size > 300) lastContent.clear()
         lastContent[sbn.key] = signature
 
-        IslandBus.postNotification(
+        // Many apps post the same message twice: re-posted a moment later (avatar
+        // loaded, sync finished, our "Only in the island" cancel) or under a second
+        // key. Same app + same words within a few seconds is one pop-up, not two.
+        val now = SystemClock.elapsedRealtime()
+        val duplicate = !live && isRecentDuplicate("${sbn.packageName}\u0000$title\u0000$text", now)
+
+        if (!duplicate) IslandBus.postNotification(
             NotifEvent(
                 key = sbn.key,
                 packageName = sbn.packageName,
@@ -211,7 +217,7 @@ class IslandNotificationListener : NotificationListenerService() {
 
         // Let the user hear the notification even when the Island replaces
         // the system banner (live activities re-post constantly, so don't chime).
-        if (!live) playNotificationSound()
+        if (!live && !duplicate) playNotificationSound()
 
         // A notification listener cannot suppress protected system UI (including calls),
         // but it can remove normal, clearable app notifications once the Island has them.
@@ -254,6 +260,7 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private companion object {
+        const val DUPLICATE_WINDOW_MS = 8000L
         val WHITESPACE = Regex("\\s*\\n\\s*")
         val TIMER_RE = Regex("\\b(timer|stopwatch|countdown)\\b", RegexOption.IGNORE_CASE)
         val NAV_RE = Regex(
@@ -280,9 +287,21 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
-        lastContent.remove(sbn.key)
+        // We removed it ourselves ("Only in the island"): keep remembering its
+        // content, so the app re-posting the same message doesn't pop out again.
         if (routedKeys.remove(sbn.key)) return
+        lastContent.remove(sbn.key)
         IslandBus.postRemoved(sbn.key)
+    }
+
+    /** App + title + text → when it last popped out. */
+    private val recentPopups = HashMap<String, Long>()
+
+    private fun isRecentDuplicate(content: String, now: Long): Boolean {
+        if (recentPopups.size > 100) recentPopups.entries.removeAll { now - it.value > DUPLICATE_WINDOW_MS }
+        val last = recentPopups[content]
+        recentPopups[content] = now
+        return last != null && now - last < DUPLICATE_WINDOW_MS
     }
 
     /** Play the system default notification sound once. */
