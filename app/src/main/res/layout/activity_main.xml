@@ -97,7 +97,7 @@
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_play" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
                     <TextView style="@style/RowTitle" android:text="Videos" />
-                    <TextView style="@style/RowSub" android:text="After you leave YouTube and others" />
+                    <TextView style="@style/RowSub" android:text="Off: only music and sound. On: also YouTube, browsers and other video apps" />
                 </LinearLayout>
                 <Switch android:id="@+id/swVideo" style="@style/RowSwitch" android:contentDescription="Videos" />
             </LinearLayout>

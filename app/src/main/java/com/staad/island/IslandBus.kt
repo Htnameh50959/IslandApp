@@ -130,4 +130,11 @@ val VIDEO_PACKAGES = setOf(
     "org.videolan.vlc", "tv.twitch.android.app", "com.vivo.video", "com.sonyliv",
     "com.jio.media.ondemand", "com.graymatrix.did", "com.vivo.gallery", "com.android.gallery3d",
     "com.google.android.apps.photos",
+    // browsers: a media session there is almost always a video (YouTube in a tab etc.)
+    "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary",
+    "org.mozilla.firefox", "org.mozilla.firefox_beta", "org.mozilla.focus",
+    "com.brave.browser", "com.microsoft.emmx", "com.sec.android.app.sbrowser",
+    "com.opera.browser", "com.opera.mini.native", "com.vivaldi.browser",
+    "com.kiwibrowser.browser", "com.duckduckgo.mobile.android", "com.mi.globalbrowser",
+    "com.vivo.browser", "com.heytap.browser", "com.UCMobile.intl",
 )

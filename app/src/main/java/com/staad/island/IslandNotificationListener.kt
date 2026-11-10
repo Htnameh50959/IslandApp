@@ -44,10 +44,18 @@ class IslandNotificationListener : NotificationListenerService() {
     private val sessionsListener =
         MediaSessionManager.OnActiveSessionsChangedListener { refreshSessions(it) }
 
+    // The Videos switch changes which session is picked. Kept in a field:
+    // SharedPreferences only holds listeners weakly.
+    private val prefsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == Prefs.VIDEO) refreshSessions(null)
+        }
+
     override fun onListenerConnected() {
         IslandBus.notificationsConnected = true
         IslandBus.canceller = { key -> runCatching { cancelNotification(key) } }
         sessionManager = getSystemService(MediaSessionManager::class.java)
+        Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsListener)
         try {
             sessionManager?.addOnActiveSessionsChangedListener(sessionsListener, component)
             refreshSessions(null)
@@ -60,6 +68,7 @@ class IslandNotificationListener : NotificationListenerService() {
         IslandBus.canceller = null
         // Some phones (vivo, Xiaomi…) unbind the listener in the background, and
         // then notifications silently stop reaching the island. Ask to come back.
+        Prefs.get(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
         runCatching { requestRebind(component) }
         runCatching { sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(mediaCallback)
@@ -71,9 +80,13 @@ class IslandNotificationListener : NotificationListenerService() {
 
 
     private fun refreshSessions(list: List<MediaController>?) {
-        val sessions = (list
+        val all = (list
             ?: (try { sessionManager?.getActiveSessions(component) } catch (_: SecurityException) { null })
             ?: emptyList())
+        // Sound only (Videos switch off): skip video apps so music playing
+        // behind YouTube etc. is still picked.
+        val sessions = if (IslandConfig.load(this).videoPill) all
+            else all.filter { it.packageName !in VIDEO_PACKAGES }
         val best = sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
             ?: sessions.firstOrNull()
         if (best?.sessionToken != controller?.sessionToken) {

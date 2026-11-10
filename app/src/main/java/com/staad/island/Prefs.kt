@@ -50,8 +50,8 @@ data class IslandConfig(
     val dragDrop: Boolean = true,
     /** Face ID pill only while the lock screen is actively checking your face. */
     val faceId: Boolean = true,
-    /** Show YouTube and other video apps in the island. */
-    val videoPill: Boolean = true,
+    /** Show YouTube, browsers and other video apps in the island. Off = sound only. */
+    val videoPill: Boolean = false,
     /** Route dismissible app notifications to the Island instead of the system shade/banner. */
     val routeNotifications: Boolean = false,
     /** Keep ongoing calls, navigation and timers on the Island until they finish. */
