@@ -25,8 +25,22 @@ class HotspotMonitor(
 ) {
     var hotspotOn: Boolean = false
         private set
-    var hotspotClients: Int = 0
-        private set
+    /** Count from the Wi-Fi / tethering APIs (stays 0 for apps without system permissions). */
+    private var systemClients: Int = 0
+
+    /**
+     * Connected devices. Android only hands the client list to system apps, so the
+     * count shown in the system's own hotspot notification is preferred when present.
+     */
+    val hotspotClients: Int
+        get() = if (!hotspotOn) 0 else IslandBus.hotspotNotifClients ?: systemClients
+
+    private val notifObserver: () -> Unit = {
+        val n = IslandBus.hotspotNotifClients
+        // Devices connected means the hotspot is on, even if no state broadcast reached us.
+        if (n != null && n > 0) hotspotOn = true
+        notifyChanged()
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executor { main.post(it) }
@@ -43,8 +57,8 @@ class HotspotMonitor(
                         ?: intent.getIntExtra("clientNum", -1).takeIf { it >= 0 }
                     if (count != null) {
                         hotspotOn = true
-                        if (count != hotspotClients) {
-                            hotspotClients = count
+                        if (count != systemClients) {
+                            systemClients = count
                             notifyChanged()
                         }
                     } else {
@@ -72,6 +86,7 @@ class HotspotMonitor(
         } else {
             context.registerReceiver(hotspotReceiver, filter)
         }
+        IslandBus.hotspotObserver = notifObserver
         refreshHotspotState(null)
         registerSoftApCallback()
         registerTetherCallback()
@@ -80,10 +95,11 @@ class HotspotMonitor(
     fun stop() {
         if (!started.compareAndSet(true, false)) return
         runCatching { context.unregisterReceiver(hotspotReceiver) }
+        if (IslandBus.hotspotObserver === notifObserver) IslandBus.hotspotObserver = null
         unregisterSoftApCallback()
         unregisterTetherCallback()
         hotspotOn = false
-        hotspotClients = 0
+        systemClients = 0
     }
 
     private fun refreshHotspotState(intent: Intent?) {
@@ -93,7 +109,7 @@ class HotspotMonitor(
             state == WIFI_AP_STATE_DISABLED || state == WIFI_AP_STATE_FAILED -> false
             else -> readWifiApEnabled()
         }
-        var clients = hotspotClients
+        var clients = systemClients
         if (!enabled) clients = 0
         else if (intent != null) {
             val fromExtra = intent.getIntExtra(EXTRA_CLIENT_COUNT, -1)
@@ -104,9 +120,9 @@ class HotspotMonitor(
         } else {
             clients = readClientCount() ?: clients
         }
-        if (enabled == hotspotOn && clients == hotspotClients) return
+        if (enabled == hotspotOn && clients == systemClients) return
         hotspotOn = enabled
-        hotspotClients = if (enabled) clients else 0
+        systemClients = if (enabled) clients else 0
         notifyChanged()
     }
 
@@ -160,14 +176,14 @@ class HotspotMonitor(
                     main.post {
                         val on = state == WIFI_AP_STATE_ENABLED
                         if (on == hotspotOn) {
-                            if (!on && hotspotClients != 0) {
-                                hotspotClients = 0
+                            if (!on && systemClients != 0) {
+                                systemClients = 0
                                 notifyChanged()
                             }
                             return@post
                         }
                         hotspotOn = on
-                        if (!on) hotspotClients = 0
+                        if (!on) systemClients = 0
                         notifyChanged()
                     }
                 }
@@ -175,9 +191,9 @@ class HotspotMonitor(
                     val clients = args?.getOrNull(0) as? Collection<*>
                     val n = clients?.size ?: 0
                     main.post {
-                        val changed = !hotspotOn || n != hotspotClients
+                        val changed = !hotspotOn || n != systemClients
                         hotspotOn = true
-                        hotspotClients = n
+                        systemClients = n
                         if (changed) notifyChanged()
                     }
                 }
@@ -231,8 +247,8 @@ class HotspotMonitor(
                 main.post {
                     if (!hotspotOn && n == 0) return@post
                     if (n > 0) hotspotOn = true
-                    if (n != hotspotClients) {
-                        hotspotClients = n
+                    if (n != systemClients) {
+                        systemClients = n
                         notifyChanged()
                     }
                 }
@@ -285,5 +301,51 @@ class HotspotMonitor(
         const val WIFI_AP_STATE_DISABLED = 11
         const val WIFI_AP_STATE_ENABLED = 13
         const val WIFI_AP_STATE_FAILED = 14
+    }
+}
+
+/**
+ * Reads the system's hotspot / tethering notification ("2 devices connected",
+ * "Connected devices: 1", "No devices connected"…). Phones such as vivo, Samsung,
+ * Xiaomi and Oppo put the device count there; stock Android only says it is on.
+ */
+internal object HotspotNotification {
+    private val HOTSPOT_RE = Regex(
+        "hotspot|tethering|tethered|tether|soft ?ap|热点|共享网络",
+        RegexOption.IGNORE_CASE,
+    )
+    private const val DEVICE = "(?:devices?|users?|clients?|connections?|phones?|设备|台设备|个设备)"
+    private val NONE_RE = Regex("\\bno (?:connected )?$DEVICE|\\b(?:no|zero) one connected|未连接|无设备", RegexOption.IGNORE_CASE)
+    private val ONE_RE = Regex("\\bone (?:connected )?$DEVICE", RegexOption.IGNORE_CASE)
+    // "2 devices connected", "2 connected devices", "2 设备"
+    private val COUNT_BEFORE = Regex("(\\p{Nd}+)\\s*(?:connected\\s+)?$DEVICE", RegexOption.IGNORE_CASE)
+    // "Connected devices: 2", "Devices connected 2", "Connected: 2"
+    private val COUNT_AFTER = Regex(
+        "(?:connected\\s*$DEVICE|$DEVICE\\s*connected|connected|已连接(?:设备)?)\\s*[:：(（]?\\s*(\\p{Nd}+)",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun isHotspot(text: String, channelId: String): Boolean =
+        HOTSPOT_RE.containsMatchIn(text) || HOTSPOT_RE.containsMatchIn(channelId)
+
+    /** Device count in the notification text, or null when it names none. */
+    fun clientCount(text: String): Int? {
+        if (NONE_RE.containsMatchIn(text)) return 0
+        val m = COUNT_BEFORE.find(text) ?: COUNT_AFTER.find(text)
+        if (m != null) return toInt(m.groupValues[1])
+        if (ONE_RE.containsMatchIn(text)) return 1
+        return null
+    }
+
+    // Handles non-Latin digits too (Arabic-Indic, Devanagari…).
+    private fun toInt(digits: String): Int? {
+        var n = 0
+        for (c in digits) {
+            val d = Character.digit(c, 10)
+            if (d < 0) return null
+            n = n * 10 + d
+            if (n > 999) return null
+        }
+        return n
     }
 }

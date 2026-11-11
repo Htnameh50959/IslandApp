@@ -261,7 +261,8 @@ class IslandView(context: Context) : FrameLayout(context) {
      */
     private fun applyStrip(s: Strip, mainHotspot: Boolean, mainCharge: Boolean): Int {
         val hs = stripHotspot && !mainHotspot
-        val showCount = hs && stripClients > 0
+        // The hotspot pill shows its icon on the left; its device count still goes here.
+        val showCount = stripHotspot && stripClients > 0
         s.hotspotIcon.visibility = if (hs) VISIBLE else GONE
         s.hotspotCount.visibility = if (showCount) VISIBLE else GONE
         s.hotspotCount.text = if (showCount) stripClients.toString() else ""
@@ -277,7 +278,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         if (charge != null) s.chargeText.text = "${charge.first}%"
 
         var w = 0
-        if (hs) w += dp(15 + 3) + if (showCount) dp(16) else 0
+        if (hs) w += dp(15)
+        if (showCount) w += dp(3 + 16)
         if (charge != null) w += dp(8 + 13 + 3 + 32)
         s.row.visibility = if (w > 0) VISIBLE else GONE
         return if (w > 0) w + dp(8) else 0

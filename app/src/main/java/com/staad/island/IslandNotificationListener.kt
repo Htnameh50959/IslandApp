@@ -13,6 +13,7 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.media.AudioAttributes
@@ -57,6 +58,8 @@ class IslandNotificationListener : NotificationListenerService() {
             runCatching { cancelNotification(key) }
             ShadeCopy.cancel(this, key)
         }
+        // The hotspot may already be on (and its notification posted) before we connect.
+        runCatching { activeNotifications }.getOrNull().orEmpty().forEach { checkHotspot(it) }
         sessionManager = getSystemService(MediaSessionManager::class.java)
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsListener)
         try {
@@ -149,6 +152,7 @@ class IslandNotificationListener : NotificationListenerService() {
         sbn ?: return
         val n = sbn.notification ?: return
         if (ShadeCopy.isCopy(this, sbn)) return // our own quiet copy in the panel
+        if (checkHotspot(sbn)) return
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return // music is shown by the player
 
@@ -262,6 +266,11 @@ class IslandNotificationListener : NotificationListenerService() {
     private companion object {
         const val DUPLICATE_WINDOW_MS = 8000L
         val WHITESPACE = Regex("\\s*\\n\\s*")
+        const val HOTSPOT_TAG = "IslandHotspot"
+        val HOTSPOT_TEXT_KEYS = arrayOf(
+            Notification.EXTRA_TITLE, Notification.EXTRA_TITLE_BIG, Notification.EXTRA_TEXT,
+            Notification.EXTRA_BIG_TEXT, Notification.EXTRA_SUB_TEXT, Notification.EXTRA_INFO_TEXT,
+        )
         val TIMER_RE = Regex("\\b(timer|stopwatch|countdown)\\b", RegexOption.IGNORE_CASE)
         val NAV_RE = Regex(
             "\\b(navigation|navigating|turn left|turn right|arriving|destination|rerouting)\\b",
@@ -287,11 +296,49 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
+        if (sbn.key == hotspotKey) {
+            hotspotKey = null
+            IslandBus.postHotspotClients(null)
+        }
         // We removed it ourselves ("Only in the island"): keep remembering its
         // content, so the app re-posting the same message doesn't pop out again.
         if (routedKeys.remove(sbn.key)) return
         lastContent.remove(sbn.key)
         IslandBus.postRemoved(sbn.key)
+    }
+
+    // ── Hotspot device count ────────────────────────────────────────────────
+
+    private var hotspotKey: String? = null
+    private val systemPkgCache = HashMap<String, Boolean>()
+
+    /**
+     * Android gives the hotspot's client list only to system apps, so read the
+     * device count from the system's own hotspot notification instead.
+     * Returns true when [sbn] is that notification.
+     */
+    private fun checkHotspot(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification ?: return false
+        if (!isSystemPackage(sbn.packageName)) return false
+        val x = n.extras
+        val text = buildList {
+            for (k in HOTSPOT_TEXT_KEYS) x.getCharSequence(k)?.let { add(it) }
+            x.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.let { addAll(it) }
+        }.joinToString(" ").replace(WHITESPACE, " ")
+        if (!HotspotNotification.isHotspot(text, n.channelId.orEmpty())) return false
+        val count = HotspotNotification.clientCount(text)
+        Log.d(HOTSPOT_TAG, "${sbn.packageName} [${n.channelId}] \"$text\" -> $count")
+        hotspotKey = sbn.key
+        IslandBus.postHotspotClients(count)
+        return true
+    }
+
+    private fun isSystemPackage(pkg: String): Boolean = systemPkgCache.getOrPut(pkg) {
+        pkg == "android" || runCatching {
+            val f = packageManager.getApplicationInfo(pkg, 0).flags
+            f and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or
+                android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        }.getOrDefault(false)
     }
 
     /** App + title + text → when it last popped out. */

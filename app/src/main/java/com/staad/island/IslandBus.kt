@@ -111,6 +111,21 @@ object IslandBus {
         main.post { listener?.onNotificationRemoved(key) }
     }
 
+    /** Connected devices shown in the system's hotspot notification (null = no such notification / no count). */
+    var hotspotNotifClients: Int? = null
+        private set
+
+    /** Set by [HotspotMonitor] while the island runs; called on the main thread. */
+    var hotspotObserver: (() -> Unit)? = null
+
+    fun postHotspotClients(n: Int?) {
+        main.post {
+            if (hotspotNotifClients == n) return@post
+            hotspotNotifClients = n
+            hotspotObserver?.invoke()
+        }
+    }
+
     fun postMedia(s: MediaState?) {
         main.post {
             media = s
