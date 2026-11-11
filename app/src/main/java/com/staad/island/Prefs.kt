@@ -8,7 +8,6 @@ object Prefs {
     const val SHOW_IDLE = "show_idle"
     const val OFFSET_Y = "offset_y"
     const val OFFSET_X = "offset_x"
-    const val NOTIFICATIONS = "notifications"
     const val MEDIA = "media"
     const val CHARGING = "charging"
     const val HIDE_LANDSCAPE = "hide_landscape"
@@ -19,8 +18,6 @@ object Prefs {
     const val DROP = "drag_drop"
     const val FACE_ID = "face_id"
     const val VIDEO = "video_pill"
-    /** Stop dismissible shade banners and show those notifications only in the Island. */
-    const val ROUTE_NOTIFICATIONS = "route_notifications"
     /** Calls, navigation, timers and stopwatches stay as compact live pills. */
     const val LIVE_ACTIVITIES = "live_activities"
     /** Hotspot on / connected-devices pill. */
@@ -34,7 +31,6 @@ data class IslandConfig(
     val showIdle: Boolean = false,
     val offsetYDp: Int = 0,
     val offsetXDp: Int = 0,
-    val notifications: Boolean = true,
     val media: Boolean = true,
     val charging: Boolean = true,
     val hideLandscape: Boolean = true,
@@ -52,8 +48,6 @@ data class IslandConfig(
     val faceId: Boolean = true,
     /** Show YouTube, browsers and other video apps in the island. Off = sound only. */
     val videoPill: Boolean = false,
-    /** Route dismissible app notifications to the Island instead of the system shade/banner. */
-    val routeNotifications: Boolean = false,
     /** Keep ongoing calls, navigation and timers on the Island until they finish. */
     val liveActivities: Boolean = true,
     /** Show personal hotspot on / connected device count. */
@@ -70,7 +64,6 @@ data class IslandConfig(
                 showIdle = p.getBoolean(Prefs.SHOW_IDLE, d.showIdle),
                 offsetYDp = p.getInt(Prefs.OFFSET_Y, d.offsetYDp),
                 offsetXDp = p.getInt(Prefs.OFFSET_X, d.offsetXDp),
-                notifications = p.getBoolean(Prefs.NOTIFICATIONS, d.notifications),
                 media = p.getBoolean(Prefs.MEDIA, d.media),
                 charging = p.getBoolean(Prefs.CHARGING, d.charging),
                 hideLandscape = p.getBoolean(Prefs.HIDE_LANDSCAPE, d.hideLandscape),
@@ -81,7 +74,6 @@ data class IslandConfig(
                 dragDrop = p.getBoolean(Prefs.DROP, d.dragDrop),
                 faceId = p.getBoolean(Prefs.FACE_ID, d.faceId),
                 videoPill = p.getBoolean(Prefs.VIDEO, d.videoPill),
-                routeNotifications = p.getBoolean(Prefs.ROUTE_NOTIFICATIONS, d.routeNotifications),
                 liveActivities = p.getBoolean(Prefs.LIVE_ACTIVITIES, d.liveActivities),
                 hotspotDevices = p.getBoolean(Prefs.HOTSPOT, d.hotspotDevices),
             )

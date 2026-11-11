@@ -11,9 +11,10 @@ import android.os.SystemClock
 /** Origin Island-style live activities that stay on the pill until they finish. */
 enum class LiveKind { NONE, CALL, TIMER, NAVIGATION, ACTIVITY }
 
-/** A button from the notification itself ("Pause", "Mark as read", "Hang up"...). */
+/** A button from the notification itself ("Pause", "Hang up"...). */
 class NotifAction(val title: String, val intent: PendingIntent)
 
+/** An ongoing call, navigation session, timer or stopwatch, taken from its notification. */
 data class NotifEvent(
     val key: String,
     val packageName: String,
@@ -22,20 +23,14 @@ data class NotifEvent(
     /** The sender's photo / large picture, if the notification has one. */
     val icon: Drawable?,
     val contentIntent: PendingIntent?,
-    val autoCancel: Boolean,
-    /** An ongoing call, navigation session, timer or stopwatch. */
-    val isLiveActivity: Boolean = false,
-    val liveKind: LiveKind = LiveKind.NONE,
+    val liveKind: LiveKind,
     /** The posting app's launcher icon, shown as a badge (or alone when there is no photo). */
     val appIcon: Drawable? = null,
     val appName: String = "",
     val actions: List<NotifAction> = emptyList(),
     /** The app icon's main colour, for the glow. */
     val accent: Int = 0xFFFFFFFF.toInt(),
-) {
-    /** What the user would see; two events with the same signature are the same pop-up. */
-    val signature: String get() = "$title\u0000$text\u0000$liveKind"
-}
+)
 
 data class MediaState(
     val title: String,
@@ -90,9 +85,6 @@ object IslandBus {
             value?.onMedia(media)
         }
 
-    /** Set by the notification listener so the overlay can dismiss notifications. */
-    var canceller: ((String) -> Unit)? = null
-
     val isOverlayRunning: Boolean get() = listener != null
 
     fun postNotification(e: NotifEvent) {
@@ -131,10 +123,6 @@ object IslandBus {
             media = s
             listener?.onMedia(s)
         }
-    }
-
-    fun cancel(key: String) {
-        canceller?.invoke(key)
     }
 }
 

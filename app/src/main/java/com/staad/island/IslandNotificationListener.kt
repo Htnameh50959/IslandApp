@@ -16,12 +16,10 @@ import android.os.SystemClock
 import android.util.Log
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.RingtoneManager
 
 /**
- * Feeds the island with incoming notifications and the active media session.
+ * Feeds the island with live activities (calls, navigation, timers) and the
+ * active media session. Ordinary notifications are not shown in the island.
  * (Notification access is also what grants permission to read media sessions.)
  */
 class IslandNotificationListener : NotificationListenerService() {
@@ -31,8 +29,6 @@ class IslandNotificationListener : NotificationListenerService() {
     private var lastArt: Bitmap? = null
     private var lastAccent = Color.WHITE
     private val lastContent = HashMap<String, String>()
-    // Keys cancelled after delivery to the Island. Their removal must not hide the pop-out.
-    private val routedKeys = HashSet<String>()
     private val component by lazy { ComponentName(this, IslandNotificationListener::class.java) }
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -54,9 +50,10 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         IslandBus.notificationsConnected = true
-        IslandBus.canceller = { key ->
-            runCatching { cancelNotification(key) }
-            ShadeCopy.cancel(this, key)
+        // Earlier versions posted panel copies and test notifications: drop their channels.
+        getSystemService(NotificationManager::class.java)?.let { nm ->
+            runCatching { nm.deleteNotificationChannel("shade_copies") }
+            runCatching { nm.deleteNotificationChannel("test") }
         }
         // The hotspot may already be on (and its notification posted) before we connect.
         runCatching { activeNotifications }.getOrNull().orEmpty().forEach { checkHotspot(it) }
@@ -71,7 +68,6 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         IslandBus.notificationsConnected = false
-        IslandBus.canceller = null
         // Some phones (vivo, Xiaomi…) unbind the listener in the background, and
         // then notifications silently stop reaching the island. Ask to come back.
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
@@ -146,62 +142,33 @@ class IslandNotificationListener : NotificationListenerService() {
         )
     }
 
-    // ── Notifications ───────────────────────────────────────────────────────
+    // ── Live activities ─────────────────────────────────────────────────────
 
     override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) {
         sbn ?: return
         val n = sbn.notification ?: return
-        if (ShadeCopy.isCopy(this, sbn)) return // our own quiet copy in the panel
         if (checkHotspot(sbn)) return
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return // music is shown by the player
 
+        // Only calls, navigation and timers reach the island; other notifications stay
+        // in the system shade.
         val kind = classifyLive(n, sbn.packageName, sbn.isOngoing)
-        val live = kind != LiveKind.NONE
-        // Ongoing cards normally are noisy background services; calls, navigation and
-        // timers are useful live activities and stay in the Island until they finish.
-        if (sbn.isOngoing && !live) return
-        if (live && !Prefs.get(this).getBoolean(Prefs.LIVE_ACTIVITIES, true)) return
-        when (n.category) {
-            Notification.CATEGORY_TRANSPORT, Notification.CATEGORY_SERVICE,
-            Notification.CATEGORY_SYSTEM -> if (!live) return
-            Notification.CATEGORY_PROGRESS -> if (!live) return
-        }
-
-        // Respect silent channels and Do Not Disturb for ordinary notifications.
-        val ranking = Ranking()
-        if (!live && rankingMap?.getRanking(sbn.key, ranking) == true) {
-            if (ranking.importance < NotificationManager.IMPORTANCE_DEFAULT) return
-            if (!ranking.matchesInterruptionFilter()) return
-        }
+        if (kind == LiveKind.NONE) return
+        if (!Prefs.get(this).getBoolean(Prefs.LIVE_ACTIVITIES, true)) return
 
         val appName = appLabel(sbn.packageName)
         val (rawTitle, text) = titleAndText(n)
         val title = rawTitle.ifEmpty { appName }
         if (title.isBlank() && text.isBlank()) return
 
-        // Skip silent re-posts of the same content (progress updates, re-sorts, …).
-        // A chat app re-posting the same key with a new message is a new pop-up even
-        // if the words repeat ("ok", "ok"): `when` moves on for each new message.
-        // Live activities re-post often (elapsed time); refresh when the text changes.
-        val signature = "$title\u0000$text\u0000$kind" + if (live) "" else "\u0000${n.`when`}"
-        val previous = lastContent[sbn.key]
-        if (previous == signature) return
-        // The app asked Android to alert only the first time: updates stay quiet.
-        if (previous != null && !live && n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0) {
-            lastContent[sbn.key] = signature
-            return
-        }
+        // Live activities re-post often (elapsed time); refresh only when the text changes.
+        val signature = "$title\u0000$text\u0000$kind"
+        if (lastContent[sbn.key] == signature) return
         if (lastContent.size > 300) lastContent.clear()
         lastContent[sbn.key] = signature
 
-        // Many apps post the same message twice: re-posted a moment later (avatar
-        // loaded, sync finished, our "Only in the island" cancel) or under a second
-        // key. Same app + same words within a few seconds is one pop-up, not two.
-        val now = SystemClock.elapsedRealtime()
-        val duplicate = !live && isRecentDuplicate("${sbn.packageName}\u0000$title\u0000$text", now)
-
-        if (!duplicate) IslandBus.postNotification(
+        IslandBus.postNotification(
             NotifEvent(
                 key = sbn.key,
                 packageName = sbn.packageName,
@@ -209,8 +176,6 @@ class IslandNotificationListener : NotificationListenerService() {
                 text = text,
                 icon = largeIcon(sbn),
                 contentIntent = n.contentIntent,
-                autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
-                isLiveActivity = live,
                 liveKind = kind,
                 appIcon = appIcon(sbn.packageName),
                 appName = appName,
@@ -218,21 +183,6 @@ class IslandNotificationListener : NotificationListenerService() {
                 accent = appAccent(sbn.packageName),
             )
         )
-
-        // Let the user hear the notification even when the Island replaces
-        // the system banner (live activities re-post constantly, so don't chime).
-        if (!live && !duplicate) playNotificationSound()
-
-        // A notification listener cannot suppress protected system UI (including calls),
-        // but it can remove normal, clearable app notifications once the Island has them.
-        // That also takes them out of the panel, so a quiet copy is put back there.
-        if (!live && sbn.isClearable && Prefs.get(this).getBoolean(Prefs.ROUTE_NOTIFICATIONS, false)) {
-            routedKeys += sbn.key
-            mainHandler.post {
-                runCatching { cancelNotification(sbn.key) }
-                ShadeCopy.post(this, sbn, appName, title, text)
-            }
-        }
     }
 
     private fun classifyLive(n: Notification, pkg: String, ongoing: Boolean): LiveKind {
@@ -264,7 +214,6 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private companion object {
-        const val DUPLICATE_WINDOW_MS = 8000L
         val WHITESPACE = Regex("\\s*\\n\\s*")
         const val HOTSPOT_TAG = "IslandHotspot"
         val HOTSPOT_TEXT_KEYS = arrayOf(
@@ -296,14 +245,11 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
+        lastContent.remove(sbn.key)
         if (sbn.key == hotspotKey) {
             hotspotKey = null
             IslandBus.postHotspotClients(null)
         }
-        // We removed it ourselves ("Only in the island"): keep remembering its
-        // content, so the app re-posting the same message doesn't pop out again.
-        if (routedKeys.remove(sbn.key)) return
-        lastContent.remove(sbn.key)
         IslandBus.postRemoved(sbn.key)
     }
 
@@ -339,35 +285,6 @@ class IslandNotificationListener : NotificationListenerService() {
             f and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or
                 android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
         }.getOrDefault(false)
-    }
-
-    /** App + title + text → when it last popped out. */
-    private val recentPopups = HashMap<String, Long>()
-
-    private fun isRecentDuplicate(content: String, now: Long): Boolean {
-        if (recentPopups.size > 100) recentPopups.entries.removeAll { now - it.value > DUPLICATE_WINDOW_MS }
-        val last = recentPopups[content]
-        recentPopups[content] = now
-        return last != null && now - last < DUPLICATE_WINDOW_MS
-    }
-
-    /** Play the system default notification sound once. */
-    private fun playNotificationSound() {
-        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) ?: return
-        val player = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build(),
-            )
-        }
-        runCatching {
-            player.setDataSource(this, uri)
-            player.prepare()
-            player.start()
-        }
-        player.setOnCompletionListener { player.release() }
     }
 
     /**

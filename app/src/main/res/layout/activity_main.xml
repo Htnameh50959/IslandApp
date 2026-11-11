@@ -32,7 +32,7 @@
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Notifications &amp; music" />
+                    <TextView style="@style/RowTitle" android:text="Music, calls &amp; timers" />
                     <TextView android:id="@+id/statusNotif" style="@style/RowSub" />
                 </LinearLayout>
                 <Button android:id="@+id/btnNotif" style="@style/RowButton" android:text="Turn on" />
@@ -152,25 +152,6 @@
                 <Switch android:id="@+id/swStatus" style="@style/RowSwitch" android:contentDescription="Earbuds &amp; sound modes" />
             </LinearLayout>
         </LinearLayout>
-        <TextView style="@style/Section" android:text="Notifications" />
-        <LinearLayout style="@style/Card">
-            <LinearLayout style="@style/Row">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
-                <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Pop out of the island" />
-                </LinearLayout>
-                <Switch android:id="@+id/swNotif" style="@style/RowSwitch" android:contentDescription="Pop out of the island" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-            <LinearLayout style="@style/Row">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell_off" android:backgroundTint="@color/t_grey" android:importantForAccessibility="no" />
-                <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Only in the island" />
-                    <TextView style="@style/RowSub" android:text="Hide the system banners. Notifications stay in the notification panel" />
-                </LinearLayout>
-                <Switch android:id="@+id/swRouteNotifications" style="@style/RowSwitch" android:contentDescription="Only in the island" />
-            </LinearLayout>
-        </LinearLayout>
         <TextView style="@style/Section" android:text="Copy &amp; share" />
         <LinearLayout style="@style/Card">
             <LinearLayout style="@style/Row">
@@ -238,27 +219,11 @@
         </LinearLayout>
         <TextView style="@style/Section" android:text="Try it" />
         <LinearLayout style="@style/Card">
-            <LinearLayout android:id="@+id/btnPreview" style="@style/Row.Tappable">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_play" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
-                    android:textColor="@color/text" android:text="Preview a pop-out" />
-                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
-            </LinearLayout>
-            <View style="@style/Divider" />
             <LinearLayout android:id="@+id/btnFaceId" style="@style/Row.Tappable">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_face_ok" android:backgroundTint="@color/t_indigo" android:importantForAccessibility="no" />
                 <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                     android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
                     android:textColor="@color/text" android:text="Preview unlock" />
-                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-            <LinearLayout android:id="@+id/btnTest" style="@style/Row.Tappable">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
-                    android:textColor="@color/text" android:text="Send a test notification" />
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
         </LinearLayout>

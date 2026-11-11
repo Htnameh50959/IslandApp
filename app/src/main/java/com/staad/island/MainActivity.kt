@@ -3,18 +3,13 @@ package com.staad.island
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
@@ -27,7 +22,6 @@ import android.widget.Toast
 class MainActivity : Activity() {
 
     private lateinit var prefs: SharedPreferences
-    private var testCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,7 +34,6 @@ class MainActivity : Activity() {
 
         bindSwitch(R.id.swEnabled, Prefs.ENABLED, d.enabled)
         bindSwitch(R.id.swIdle, Prefs.SHOW_IDLE, d.showIdle)
-        bindSwitch(R.id.swNotif, Prefs.NOTIFICATIONS, d.notifications)
         bindSwitch(R.id.swMedia, Prefs.MEDIA, d.media)
         bindSwitch(R.id.swCharging, Prefs.CHARGING, d.charging)
         bindSwitch(R.id.swLandscape, Prefs.HIDE_LANDSCAPE, d.hideLandscape)
@@ -49,7 +42,6 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swHotspot, Prefs.HOTSPOT, d.hotspotDevices)
         bindSwitch(R.id.swDrop, Prefs.DROP, d.dragDrop)
         bindSwitch(R.id.swVideo, Prefs.VIDEO, d.videoPill)
-        bindSwitch(R.id.swRouteNotifications, Prefs.ROUTE_NOTIFICATIONS, d.routeNotifications)
         // Timer, navigation and call status share one live-activities preference.
         bindLinkedSwitches(
             intArrayOf(R.id.swLiveActivities, R.id.swNavigation, R.id.swCall),
@@ -79,13 +71,11 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
             }
         }
-        findViewById<View>(R.id.btnPreview).setOnClickListener { preview() }
         findViewById<View>(R.id.btnFaceId).setOnClickListener {
             if (!IslandBus.isOverlayRunning) {
                 Toast.makeText(this, "Turn on step 1 first", Toast.LENGTH_SHORT).show()
             } else IslandBus.postFaceIdPreview()
         }
-        findViewById<View>(R.id.btnTest).setOnClickListener { sendTestNotification() }
         findViewById<View>(R.id.btnReset).setOnClickListener {
             prefs.edit().clear().apply()
             recreate()
@@ -193,65 +183,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun preview() {
-        if (!IslandBus.isOverlayRunning) {
-            Toast.makeText(this, "Turn on step 1 first", Toast.LENGTH_SHORT).show()
-            return
-        }
-        IslandBus.postNotification(
-            NotifEvent(
-                key = "island-preview",
-                packageName = packageName,
-                title = "Hello from the Island ✨",
-                text = "Tap to expand, tap again to open. Long-press for controls, swipe up to dismiss.",
-                icon = null,
-                contentIntent = null,
-                autoCancel = false,
-                appIcon = getDrawable(R.mipmap.ic_launcher),
-                appName = "Island",
-            )
-        )
-    }
-
-    private fun sendTestNotification() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
-            return
-        }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Test notifications", NotificationManager.IMPORTANCE_DEFAULT)
-        )
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        testCount++
-        val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_bolt)
-            .setContentTitle("Test notification #$testCount")
-            .setContentText("This popped out of the island. Tap it to come back here.")
-            .setContentIntent(open)
-            .setAutoCancel(true)
-            .build()
-        Toast.makeText(this, "Arriving in 2 seconds — go to your home screen", Toast.LENGTH_SHORT).show()
-        Handler(Looper.getMainLooper()).postDelayed({ nm.notify(TEST_ID, n) }, 2000)
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_NOTIF && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            sendTestNotification()
-        }
         if (requestCode == REQ_BT) onResume()
     }
 
     private companion object {
-        const val CHANNEL = "test"
-        const val TEST_ID = 42
-        const val REQ_NOTIF = 7
         const val REQ_BT = 8
     }
 }

@@ -50,7 +50,7 @@ import kotlin.math.roundToInt
  * Owns the overlay window and decides what the island shows.
  *
  * Priority (highest first):
- *   drop target › suggestion card (copied link…) › notification › hotspot
+ *   drop target › suggestion card (copied link…) › live activity › hotspot
  *   (connected devices) › status (earbuds, silent…) › charging ›
  *   expanded player › compact "now playing" › idle
  */
@@ -72,12 +72,8 @@ class IslandService : AccessibilityService(),
     private var cfg = IslandConfig.DEFAULT
 
     private var media: MediaState? = null
+    /** The live activity (call, navigation, timer) on the island. */
     private var notif: NotifEvent? = null
-    private var notifShownAt = 0L
-    // Recent pop-ups (key → what was shown, when), to suppress re-delivered duplicates.
-    private val lastShown = HashMap<String, Pair<String, Long>>()
-    // Notifications that arrived while another one was still being read.
-    private val pending = ArrayDeque<NotifEvent>()
     private var charge: Pair<Int, Boolean>? = null
     private var mediaExpanded = false
     private var receiverRegistered = false
@@ -88,7 +84,6 @@ class IslandService : AccessibilityService(),
     private var liveExpanded = false
     /** Long-pressed: the open card also shows the app's own buttons. */
     private var notifControls = false
-    private var notificationExpanded = false
     private var card: Card? = null
     private var dropActive = false
     private var dropHover = false
@@ -129,7 +124,6 @@ class IslandService : AccessibilityService(),
     private var hotspot: HotspotMonitor? = null
 
     private val clearNotif = Runnable { nextNotification() }
-    private val showPending = Runnable { if (notif == null) nextNotification() }
     private val clearCharge = Runnable { charge = null; render() }
     private val clearStatus = Runnable {
         if (status?.title == "Face ID") faceScanActive = false
@@ -818,76 +812,42 @@ class IslandService : AccessibilityService(),
     }
 
     override fun onNotification(event: NotifEvent) {
-        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "notification from ${event.packageName}")
-        if (!cfg.notifications) return
-        // Some systems re-deliver the same notification: ignore the same content
-        // again within 2s. A new message on the same key is still shown.
-        val now = SystemClock.uptimeMillis()
-        lastShown[event.key]?.let { (sig, at) -> if (sig == event.signature && now - at < 2000) return }
-        if (lastShown.size > 100) lastShown.clear()
-        lastShown[event.key] = event.signature to now
-
-        val current = notif
-        when {
-            // Same notification updated (new chat message, timer ticking): refresh in place.
-            current?.key == event.key -> {
-                notif = event
-                if (!notificationExpanded && !liveExpanded) armNotifTimeout(event)
-                render()
-            }
-            // Another pop-up only just appeared: let it be read first, then show this one.
-            current != null && !current.isLiveActivity && now - notifShownAt < MIN_READ_MS -> {
-                pending.removeAll { it.key == event.key }
-                pending.addLast(event)
-                while (pending.size > MAX_PENDING) pending.removeFirst()
-                if (!notificationExpanded) {
-                    handler.removeCallbacks(clearNotif)
-                    handler.postDelayed(clearNotif, notifShownAt + MIN_READ_MS - now)
-                }
-            }
-            else -> {
-                pending.removeAll { it.key == event.key }
-                present(event)
-            }
+        if (DEBUG_COPY) android.util.Log.i("IslandCopy", "live activity from ${event.packageName}")
+        if (notif?.key == event.key) {
+            // Same activity updated (timer ticking, next turn): refresh in place.
+            notif = event
+            if (!liveExpanded) armNotifTimeout(event)
+            render()
+        } else {
+            present(event)
         }
     }
 
     private fun present(event: NotifEvent) {
         notif = event
-        notificationExpanded = false
         liveExpanded = false
         notifControls = false
-        notifShownAt = SystemClock.uptimeMillis()
         mediaExpanded = false
         armNotifTimeout(event)
         render()
     }
 
-    /** Pop-ups close on their own; one with more to read stays a little longer. */
+    /** The pill folds back on its own; one with more to read stays a little longer. */
     private fun armNotifTimeout(event: NotifEvent) {
         handler.removeCallbacks(clearNotif)
-        val long = event.text.length > 60
-        val holdMs = if (pending.isNotEmpty()) 3000L else if (long) 6000L else 4500L
-        handler.postDelayed(clearNotif, holdMs)
+        handler.postDelayed(clearNotif, if (event.text.length > 60) 6000L else 4500L)
     }
 
-    /** The current pop-up is done: show the next waiting one, or go back to idle. */
+    /** The live activity is done or put away: go back to idle. */
     private fun nextNotification() {
         handler.removeCallbacks(clearNotif)
-        handler.removeCallbacks(showPending)
-        notificationExpanded = false
         liveExpanded = false
         notifControls = false
-        val next = pending.removeFirstOrNull()
-        if (next != null) present(next) else {
-            notif = null
-            render()
-        }
+        notif = null
+        render()
     }
 
     override fun onNotificationRemoved(key: String) {
-        lastShown.remove(key)
-        pending.removeAll { it.key == key }
         if (notif?.key == key) nextNotification()
     }
 
@@ -912,8 +872,8 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         if (DEBUG_COPY) android.util.Log.i(
             "IslandCopy",
-            "render drop=$dropActive card=${card != null} notif=${notif != null} status=${status != null} " +
-                "charge=${charge != null} media=${media != null} exp=$mediaExpanded cfgNotif=${cfg.notifications} enabled=${cfg.enabled}",
+            "render drop=$dropActive card=${card != null} live=${notif != null} status=${status != null} " +
+                "charge=${charge != null} media=${media != null} exp=$mediaExpanded enabled=${cfg.enabled}",
         )
         val m = media?.takeIf { cfg.media && (!it.isVideo || cfg.videoPill) }
         if (m == null) mediaExpanded = false
@@ -927,11 +887,10 @@ class IslandService : AccessibilityService(),
         when {
             dropActive -> v.showDropTarget(dropHover)
             k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
-            n != null && (notificationExpanded || (n.isLiveActivity && liveExpanded)) ->
+            n != null && liveExpanded ->
                 v.showNotification(n, expanded = true, actions = notificationActions(n, notifControls), controls = notifControls)
             st != null && statusExpanded -> v.showActions(st.icon, st.tint, st.title, st.value, emptyList())
-            n != null && n.isLiveActivity -> v.showLiveActivity(n.liveKind, n.title, n.text)
-            n != null -> v.showNotification(n, expanded = false, actions = emptyList())
+            n != null -> v.showLiveActivity(n.liveKind, n.title, n.text)
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked", st.icon)
             hotspotOn -> v.showHotspot(p?.hotspotClients ?: 0)
             st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
@@ -1075,10 +1034,9 @@ class IslandService : AccessibilityService(),
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "tap")
         val v = island ?: return
         when (v.mode) {
-            // Tap opens the activity: the pop-out grows into the full card; a tap
-            // on the open card goes to the app.
+            // A tap on the open live card goes to the app.
             Mode.NOTIFICATION -> notif?.let { n ->
-                if (notificationExpanded || liveExpanded) openNotification(n) else expandNotification(n, controls = false)
+                if (liveExpanded) openNotification(n) else expandNotification(n, controls = false)
             }
             // A live pill (timer, call, navigation) opens into its card.
             Mode.LIVE -> notif?.let { expandNotification(it, controls = false) }
@@ -1140,11 +1098,10 @@ class IslandService : AccessibilityService(),
 
     override fun onSwipeUp() {
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "swipe up")
-        // An open card first folds back; a notification is put away and the next one shows.
+        // An open card first folds back; a live pill is put away.
         val v = island
         if (notif != null && v != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE)) {
-            if (notificationExpanded || liveExpanded) {
-                notificationExpanded = false
+            if (liveExpanded) {
                 liveExpanded = false
                 notifControls = false
                 notif?.let { armNotifTimeout(it) }
@@ -1158,50 +1115,38 @@ class IslandService : AccessibilityService(),
     }
 
     /**
-     * Grow the notification into its full card (all of the text, Open / Clear);
+     * Grow the live pill into its full card (all of the text, Open / Hide);
      * with [controls] also the app's own buttons. It stays while you read it.
      */
     private fun expandNotification(n: NotifEvent, controls: Boolean) {
-        if (n.isLiveActivity) liveExpanded = true else notificationExpanded = true
+        liveExpanded = true
         notifControls = controls
         handler.removeCallbacks(clearNotif)
         handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
         render()
     }
 
-    /** Open card: Clear · Open. With controls: the app's own buttons first. */
+    /** Open card: Hide · Open. With controls: the app's own buttons first. */
     private fun notificationActions(n: NotifEvent, controls: Boolean): List<IslandView.Action> {
-        val clear = IslandView.Action(if (n.isLiveActivity) "Hide" else "Clear", null, 0) {
-            // Clear removes it from the shade too; a call or timer is only hidden here.
-            if (!n.isLiveActivity) IslandBus.cancel(n.key)
-            nextNotification()
-        }
+        // A call or timer is only hidden here, never removed from the shade.
+        val hide = IslandView.Action("Hide", null, 0) { nextNotification() }
         val open = IslandView.Action("Open", null, R.drawable.ic_open) { openNotification(n) }
-        if (!controls || n.actions.isEmpty()) return listOf(clear, open)
+        if (!controls || n.actions.isEmpty()) return listOf(hide, open)
         val own = n.actions.take(2).map { a ->
             IslandView.Action(a.title, null, 0) {
                 send(a.intent)
-                // Live activities update themselves (Pause → Resume); others are done.
-                if (n.isLiveActivity) {
-                    handler.removeCallbacks(clearNotif)
-                    handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
-                } else {
-                    nextNotification()
-                }
+                // Live activities update themselves (Pause → Resume): keep the card open.
+                handler.removeCallbacks(clearNotif)
+                handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
             }
         }
-        return own + clear + open
+        return own + hide + open
     }
 
-    /**
-     * Flick sideways: change activity. With notifications waiting it moves to
-     * the next one; on the open player it changes song; otherwise it dismisses.
-     */
+    /** Flick sideways: on the open player it changes song; otherwise it dismisses. */
     override fun onSwipeSideways(toLeft: Boolean) {
         val v = island ?: return
         when {
-            notif != null && pending.isNotEmpty() &&
-                (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) -> nextNotification()
             v.mode == Mode.MEDIA -> if (toLeft) onNext() else onPrev()
             else -> onSwipeUp()
         }
@@ -1220,18 +1165,13 @@ class IslandService : AccessibilityService(),
             card = null
             changed = true
         }
-        // Touching the app below folds an open card back. A fresh notification is
-        // left alone for a moment so it isn't lost just because you were scrolling.
+        // Touching the app below folds an open live card back.
         val n = notif
-        if (n != null && (notificationExpanded || liveExpanded)) {
-            notificationExpanded = false
+        if (n != null && liveExpanded) {
             liveExpanded = false
             notifControls = false
             armNotifTimeout(n)
             changed = true
-        } else if (n != null && !n.isLiveActivity && SystemClock.uptimeMillis() - notifShownAt > OUTSIDE_GRACE_MS) {
-            nextNotification()
-            return
         }
         if (changed) render()
     }
@@ -1275,8 +1215,6 @@ class IslandService : AccessibilityService(),
     }
 
     private fun dismissAll() {
-        pending.clear()
-        notificationExpanded = false
         liveExpanded = false
         notifControls = false
         handler.removeCallbacks(clearNotif)
@@ -1294,7 +1232,7 @@ class IslandService : AccessibilityService(),
     }
 
     /**
-     * Open the app the notification came from, then fold the island straight back
+     * Open the app the live activity came from, then fold the island straight back
      * into the camera. If the app's own link no longer works (it was cancelled or
      * the app was updated), open the app itself instead.
      */
@@ -1308,16 +1246,11 @@ class IslandService : AccessibilityService(),
                     ?.let { startActivity(it) }
             }
         }
-        if (n.autoCancel && !n.isLiveActivity) IslandBus.cancel(n.key)
         handler.removeCallbacks(clearNotif)
-        handler.removeCallbacks(showPending)
-        notificationExpanded = false
         liveExpanded = false
         notifControls = false
         notif = null
         render()
-        // Let the island close fully before the next waiting notification grows out.
-        if (pending.isNotEmpty()) handler.postDelayed(showPending, 650)
     }
 
     /** Returns false when the PendingIntent is gone. */
@@ -1343,13 +1276,8 @@ class IslandService : AccessibilityService(),
         const val PARKED = -200
         const val PREF_FACE_STAYS = "face_unlock_stays_on_lockscreen"
         val BOUNCER_CLASS = Regex("(?i)(pin|password|pattern|bouncer|numpad|passcode)")
-        /** A pop-up is on screen at least this long before the next one replaces it. */
-        const val MIN_READ_MS = 1800L
-        const val MAX_PENDING = 5
         /** An opened card stays this long while you read it. */
         const val EXPANDED_HOLD_MS = 9000L
-        /** Touches elsewhere don't close a notification that just appeared. */
-        const val OUTSIDE_GRACE_MS = 2500L
         val COPY_WORD = Regex("\\bcopy\\b")
         const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
