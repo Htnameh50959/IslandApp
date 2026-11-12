@@ -84,6 +84,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        A11yGuard.repair(this)
         val a11y = isAccessibilityEnabled()
         val listener = getSystemService(NotificationManager::class.java)
             .isNotificationListenerAccessGranted(ComponentName(this, IslandNotificationListener::class.java))

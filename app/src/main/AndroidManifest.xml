@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Earbuds pop-ups: the name and battery of a Bluetooth device that connects. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -7,6 +8,12 @@
     <!-- Hotspot on / connected-devices pill. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Put the Accessibility service back when the phone's cleaner turns it off (A11yGuard).
+         Only works after: adb shell pm grant com.staad.island android.permission.WRITE_SECURE_SETTINGS -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Lets us load icons/labels of apps that post notifications (Android 11+ package visibility). -->
     <queries>
@@ -78,6 +85,15 @@
         </service>
 
         <!-- Receives notifications and media sessions. -->
+        <receiver
+            android:name=".A11yGuard$Receiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".IslandNotificationListener"
             android:exported="true"

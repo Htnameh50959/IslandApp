@@ -48,8 +48,19 @@ class IslandNotificationListener : NotificationListenerService() {
             if (key == Prefs.VIDEO) refreshSessions(null)
         }
 
+    // vivo's cleaner turns the island's Accessibility service off now and then: put it back.
+    private val guardHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val guard = object : Runnable {
+        override fun run() {
+            A11yGuard.repair(this@IslandNotificationListener)
+            guardHandler.postDelayed(this, 30_000)
+        }
+    }
+
     override fun onListenerConnected() {
         IslandBus.notificationsConnected = true
+        guardHandler.removeCallbacks(guard)
+        guardHandler.post(guard)
         // Earlier versions posted panel copies and test notifications: drop their channels.
         getSystemService(NotificationManager::class.java)?.let { nm ->
             runCatching { nm.deleteNotificationChannel("shade_copies") }
@@ -68,6 +79,7 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         IslandBus.notificationsConnected = false
+        guardHandler.removeCallbacks(guard)
         // Some phones (vivo, Xiaomi…) unbind the listener in the background, and
         // then notifications silently stop reaching the island. Ask to come back.
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
