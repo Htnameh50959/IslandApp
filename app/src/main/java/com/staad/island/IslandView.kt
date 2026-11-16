@@ -610,6 +610,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         setLineSpacing(dp(2).toFloat(), 1f)
     }
     private var actionKey: String? = null
+    private var actionButtonsKey: String? = null
     private val actionRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -1050,12 +1051,14 @@ class IslandView(context: Context) : FrameLayout(context) {
      * Origin Island-style live pill for a call, timer, navigation or other ongoing activity.
      * Compact like status, but sticky until the source notification ends.
      */
-    fun showLiveActivity(kind: LiveKind, title: String, text: String) {
+    fun showLiveActivity(kind: LiveKind, title: String, text: String, badge: Drawable? = null) {
         val (icon, tint, label) = when (kind) {
             LiveKind.CALL -> Triple(R.drawable.ic_phone, green, "Call")
             LiveKind.TIMER -> Triple(R.drawable.ic_timer, 0xFFFF9F0A.toInt(), "Timer")
             LiveKind.NAVIGATION -> Triple(R.drawable.ic_nav, green, "Nav")
-            LiveKind.ACTIVITY, LiveKind.NONE -> Triple(R.drawable.ic_bolt, blue, "Live")
+            // Messages and other live cards show their app's own icon (passed in as
+            // `badge`); the fallback must not be the bolt, which reads as charging.
+            LiveKind.ACTIVITY, LiveKind.NONE -> Triple(R.drawable.ic_message, blue, "Live")
         }
         // Prefer the dynamic bit (time / distance / instruction) as the right-hand value.
         val primary = text.ifBlank { title }.ifBlank { label }
@@ -1063,7 +1066,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             text.isNotBlank() && title.isNotBlank() && title != text -> title.take(18)
             else -> label
         }
-        showStatusLike(Mode.LIVE, icon, tint, secondary, primary.take(22), tint)
+        showStatusLike(Mode.LIVE, icon, tint, secondary, primary.take(22), tint, badge)
     }
 
     private fun showStatusLike(
@@ -1073,6 +1076,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         title: String,
         value: String,
         valueColor: Int,
+        /** A real drawable (an app icon) to show instead of the tinted glyph. */
+        badge: Drawable? = null,
     ) {
         // Same pill already on screen (the island re-renders whenever anything
         // changes, e.g. music moving to the earbuds): don't animate it again.
@@ -1101,8 +1106,13 @@ class IslandView(context: Context) : FrameLayout(context) {
         (statusValue.layoutParams as LinearLayout.LayoutParams).width = valueWidth
         statusLayer.requestLayout()
         val fill = {
-            statusIcon.setImageResource(icon)
-            statusIcon.imageTintList = ColorStateList.valueOf(tint)
+            if (badge != null) {
+                statusIcon.setImageDrawable(badge)
+                statusIcon.imageTintList = null
+            } else {
+                statusIcon.setImageResource(icon)
+                statusIcon.imageTintList = ColorStateList.valueOf(tint)
+            }
             statusTitle.text = title
             statusValue.text = value
             statusValue.setTextColor(valueColor)
@@ -1180,7 +1190,10 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     /** A card with suggestions, e.g. for a copied link: Open · Share. */
     fun showActions(badge: Int, tint: Int, kind: String, text: String, actions: List<Action>) {
-        val contentKey = "$kind\u0000$text"
+        // The buttons (not the text) decide whether this is a new card: a ticking
+        // timer updates its text every second and must not blur and bounce each time.
+        val labels = actions.joinToString("|") { it.label }
+        val contentKey = "$kind\u0000$labels"
         // A re-render of the card already on screen isn't a new card: no blur, no bounce.
         val replacing = mode == Mode.ACTIONS && currentLayer === actionLayer && actionKey != contentKey
         actionKey = contentKey
@@ -1198,8 +1211,13 @@ class IslandView(context: Context) : FrameLayout(context) {
             actionBadge.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(tint) }
             actionKind.text = kind.uppercase()
             actionText.text = text
-            actionRow.removeAllViews()
-            for (a in actions.take(4)) actionRow.addView(actionButton(a), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (actionButtonsKey != labels) {
+                actionButtonsKey = labels
+                actionRow.removeAllViews()
+                for (a in actions.take(4)) {
+                    actionRow.addView(actionButton(a), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                }
+            }
         }
         if (replacing) {
             refill(actionLayer, fill)

@@ -288,9 +288,22 @@ class IslandNotificationListener : NotificationListenerService() {
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
         val blob = "$title $text".lowercase()
+        val p = pkg.lowercase()
+        val cfg = IslandConfig.load(applicationContext)
+        val callPkg = cfg.callApps.any { p.contains(it.lowercase()) } || CALL_PACKAGES.any { p.contains(it) }
 
-        // Only treat as a live activity when it's genuinely ongoing — a missed-call
-        // or one-shot alert with CATEGORY_CALL should not stick as a live pill.
+        // A live call is not always flagged ongoing: once the call connects, the
+        // dialer posts its card as an ordinary notification, so keying on the flag
+        // made the pill vanish mid-call. Only missed / declined calls are skipped.
+        if (!MISSED_RE.containsMatchIn(blob) &&
+            (n.category == Notification.CATEGORY_CALL ||
+                (callPkg && CALL_RE.containsMatchIn(blob)))
+        ) {
+            return LiveKind.CALL
+        }
+
+        // Other live activities only when genuinely ongoing — a one-shot alert
+        // should not stick as a live pill.
         when (n.category) {
             Notification.CATEGORY_CALL -> if (ongoing) return LiveKind.CALL
             Notification.CATEGORY_NAVIGATION -> if (ongoing) return LiveKind.NAVIGATION
@@ -301,9 +314,7 @@ class IslandNotificationListener : NotificationListenerService() {
         // toasts and one-shot alerts should not stick forever on the island.
         if (!ongoing && !chronometer) return LiveKind.NONE
 
-        val p = pkg.lowercase()
-        val cfg = IslandConfig.load(applicationContext)
-        if (cfg.callApps.any { p.contains(it.lowercase()) } || CALL_PACKAGES.any { p.contains(it) }) return LiveKind.CALL
+        if (callPkg) return LiveKind.CALL
         if (cfg.navApps.any { p.contains(it.lowercase()) } || NAV_PACKAGES.any { p.contains(it) }) return LiveKind.NAVIGATION
         if (cfg.timerApps.any { p.contains(it.lowercase()) } || TIMER_PACKAGES.any { p.contains(it) }) return LiveKind.TIMER
 
@@ -341,6 +352,11 @@ class IslandNotificationListener : NotificationListenerService() {
         )
         val CALL_RE = Regex(
             "\\b(incoming call|ongoing call|in call|call in progress|calling|ringing)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        /** A call that is over or was never answered must not stay on the island. */
+        val MISSED_RE = Regex(
+            "\\b(missed|declined|unanswered|rejected|call ended|blocked)\\b",
             RegexOption.IGNORE_CASE,
         )
         val CALL_PACKAGES = listOf(

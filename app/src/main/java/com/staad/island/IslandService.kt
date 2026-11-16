@@ -148,6 +148,133 @@ class IslandService : AccessibilityService(),
         }
     }
 
+    // ── Island timers (in-app countdown + stopwatch) ────────────────────────
+    // The clock app's timer only carries a base time, so the island can show it
+    // but not control it. These are started here and run here, which is what
+    // lets the card offer Start / Pause · Reset · Stop.
+    private enum class TimerKind { COUNTDOWN, STOPWATCH }
+
+    private class IslandTimer(
+        val kind: TimerKind,
+        /** Countdown length in ms; unused by the stopwatch. */
+        val lengthMs: Long,
+        var startedAt: Long = 0L,
+        var accumulatedMs: Long = 0L,
+        var running: Boolean = false,
+    ) {
+        fun elapsed(now: Long): Long {
+            val total = accumulatedMs + if (running) (now - startedAt).coerceAtLeast(0L) else 0L
+            return if (kind == TimerKind.COUNTDOWN) total.coerceAtMost(lengthMs) else total
+        }
+    }
+
+    private var timerState: IslandTimer? = null
+    private var timerExpanded = false
+
+    private fun nowMs() = SystemClock.elapsedRealtime()
+
+    /** What the pill shows: time left for a countdown, time elapsed for a stopwatch. */
+    private fun timerRemaining(t: IslandTimer): Long = when (t.kind) {
+        TimerKind.COUNTDOWN -> t.lengthMs - t.elapsed(nowMs())
+        TimerKind.STOPWATCH -> t.elapsed(nowMs())
+    }
+
+    private fun timerText(t: IslandTimer): String = clock(timerRemaining(t))
+
+    private fun timerTitle(t: IslandTimer): String =
+        if (t.kind == TimerKind.STOPWATCH) "Stopwatch" else "Timer"
+
+    /** "04:59" / "1:02:59". Counts up, so partial seconds round up. */
+    private fun clock(ms: Long): String {
+        val total = (ms.coerceAtLeast(0L) + 999) / 1000
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+    }
+
+    private fun startTimerClock(minutes: Int) {
+        timerState = IslandTimer(
+            TimerKind.COUNTDOWN, minutes * 60_000L, startedAt = nowMs(), running = true,
+        )
+        timerExpanded = true
+        card = null
+        island?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        render()
+    }
+
+    private fun startStopwatch() {
+        timerState = IslandTimer(TimerKind.STOPWATCH, 0L, startedAt = nowMs(), running = true)
+        timerExpanded = true
+        card = null
+        island?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        render()
+    }
+
+    private fun pauseTimer() {
+        val t = timerState ?: return
+        t.accumulatedMs = t.elapsed(nowMs())
+        t.startedAt = 0L
+        t.running = false
+        render()
+    }
+
+    private fun resumeTimer() {
+        val t = timerState ?: return
+        t.startedAt = nowMs()
+        t.running = true
+        render()
+    }
+
+    /** Back to the start of the countdown / 00:00, paused. */
+    private fun resetTimer() {
+        val t = timerState ?: return
+        t.accumulatedMs = 0L
+        t.startedAt = 0L
+        t.running = false
+        render()
+    }
+
+    private fun stopTimer() {
+        timerState = null
+        timerExpanded = false
+        handler.removeCallbacks(timerTick)
+        render()
+    }
+
+    /** A countdown reached zero: ring it once, then fold the island away. */
+    private fun finishTimer() {
+        val t = timerState ?: return
+        timerState = null
+        timerExpanded = false
+        handler.removeCallbacks(timerTick)
+        island?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        showStatus(Status(R.drawable.ic_timer, ORANGE, timerTitle(t), "Done", ORANGE), 4000)
+    }
+
+    private fun timerActions(t: IslandTimer): List<IslandView.Action> = buildList {
+        if (t.running) {
+            add(IslandView.Action("Pause", null, 0) { pauseTimer() })
+        } else {
+            add(IslandView.Action("Start", null, R.drawable.ic_play) { resumeTimer() })
+        }
+        add(IslandView.Action("Reset", null, 0) { resetTimer() })
+        add(IslandView.Action("Stop", null, 0) { stopTimer() })
+    }
+
+    /** Keeps the pill's clock moving while the timer runs. */
+    private val timerTick = object : Runnable {
+        override fun run() {
+            val t = timerState ?: return
+            if (!t.running) return
+            if (t.kind == TimerKind.COUNTDOWN && timerRemaining(t) <= 0L) {
+                finishTimer()
+                return
+            }
+            render()
+        }
+    }
+
     /** "03:58" / "1:02:59" for a running timer or stopwatch. */
     private fun clockText(n: NotifEvent): String {
         val base = n.chronometerBase
@@ -919,17 +1046,18 @@ class IslandService : AccessibilityService(),
         render()
     }
 
+    /** An activity that is still running (timer, call, navigation, stopwatch). */
+    private fun isOngoingLive(event: NotifEvent): Boolean =
+        event.chronometerBase > 0L || event.liveKind == LiveKind.CALL ||
+            event.liveKind == LiveKind.TIMER || event.liveKind == LiveKind.NAVIGATION
+
     /** The pill folds back on its own; one with more to read stays a little longer. */
     private fun armNotifTimeout(event: NotifEvent) {
         handler.removeCallbacks(clearNotif)
-        // An activity that is still running (timer, call, navigation, stopwatch)
-        // stays on the island until its notification goes away: folding it back
-        // after a few seconds would hide the countdown that is the whole point.
-        val ongoing = event.chronometerBase > 0L ||
-            event.liveKind == LiveKind.CALL ||
-            event.liveKind == LiveKind.TIMER ||
-            event.liveKind == LiveKind.NAVIGATION
-        if (ongoing) return
+        // An activity that is still running stays on the island until its
+        // notification goes away: folding it back after a few seconds would hide
+        // the countdown (or the call) that is the whole point.
+        if (isOngoingLive(event)) return
         handler.postDelayed(clearNotif, if (event.text.length > 60) 6000L else 4500L)
     }
 
@@ -943,7 +1071,18 @@ class IslandService : AccessibilityService(),
     }
 
     override fun onNotificationRemoved(key: String) {
-        if (notif?.key == key) nextNotification()
+        val current = notif ?: return
+        if (current.key != key) return
+        if (!isOngoingLive(current)) {
+            nextNotification()
+            return
+        }
+        // Dialers cancel and re-post their call card while the call is still up
+        // (ringing › connected, putting the screen to sleep). Clearing straight
+        // away made the pill blink in and out mid-call, so give it a moment to
+        // come back; a re-post cancels this by re-arming the timeout.
+        handler.removeCallbacks(clearNotif)
+        handler.postDelayed(clearNotif, REMOVE_GRACE_MS)
     }
 
     /** "Preview Face ID" button: scanning, then the green check. */
@@ -1034,10 +1173,12 @@ class IslandService : AccessibilityService(),
         if (m == null) mediaExpanded = false
         val n = notif
         val c = charge
+        if (c == null) chargeExpanded = false
         val k = card
         val st = status
         val p = hotspot
         val hotspotOn = cfg.hotspotDevices && p?.hotspotOn == true
+        if (!hotspotOn) hotspotExpanded = false
         val focus = swipeFocus?.takeIf { SystemClock.uptimeMillis() < swipeFocusUntil }
         if (focus != null) {
             v.setStrip(false, 0, c)
@@ -1054,7 +1195,9 @@ class IslandService : AccessibilityService(),
         // primary card, so it never appears as a bubble beside another pill.
         var secondary = SecondaryKind.NONE
         var secondaryPlaying = false
-        if (focus == null && k == null && !dropActive && !mediaExpanded && !liveExpanded && !statusExpanded) {
+        if (focus == null && k == null && !dropActive && !mediaExpanded && !liveExpanded &&
+            !statusExpanded && !hotspotExpanded && !chargeExpanded && !timerExpanded
+        ) {
             // Mirror the render `when` order so the bubble never duplicates the primary pill.
             val primaryKind = when {
                 n != null && !(n.liveKind == LiveKind.CALL) -> when (n.liveKind) {
@@ -1063,6 +1206,7 @@ class IslandService : AccessibilityService(),
                     LiveKind.ACTIVITY, LiveKind.NONE -> SecondaryKind.STATUS
                     LiveKind.CALL -> SecondaryKind.CALL // unreachable due to the guard above
                 }
+                timerState != null -> SecondaryKind.TIMER                                    // island timer
                 hotspotOn -> SecondaryKind.HOTSPOT                                          // hotspot pill
                 st != null -> SecondaryKind.STATUS                                          // status pill
                 c != null && !chargeExpanded -> SecondaryKind.CHARGING                      // charging pill
@@ -1091,7 +1235,9 @@ class IslandService : AccessibilityService(),
             if (hasMedia && primaryKind != SecondaryKind.MEDIA) candidates += SecondaryKind.MEDIA
             if (hasNav && primaryKind != SecondaryKind.NAV) candidates += SecondaryKind.NAV
             if (hasOtherLive && primaryKind != SecondaryKind.STATUS) candidates += SecondaryKind.STATUS
-            if (hasTimer && primaryKind != SecondaryKind.TIMER) candidates += SecondaryKind.TIMER
+            if ((hasTimer || timerState != null) && primaryKind != SecondaryKind.TIMER) {
+                candidates += SecondaryKind.TIMER
+            }
             if (hasCharge && primaryKind != SecondaryKind.CHARGING) candidates += SecondaryKind.CHARGING
             if (hasHotspot && primaryKind != SecondaryKind.HOTSPOT) candidates += SecondaryKind.HOTSPOT
 
@@ -1115,13 +1261,38 @@ class IslandService : AccessibilityService(),
             k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
             n != null && liveExpanded ->
                 v.showNotification(n, expanded = true, actions = notificationActions(n, notifControls), controls = notifControls)
-            st != null && statusExpanded -> v.showActions(st.icon, st.tint, st.title, st.value, emptyList())
+            st != null && statusExpanded ->
+                v.showActions(st.icon, st.tint, st.title, st.value, statusActions(st))
             // A ringing call opens straight into its card so Answer / Decline
             // are one tap away instead of hiding behind a long-press.
+            // A timer / stopwatch card the user opened stays on top of the other
+            // pills: it is the one thing they asked to look at.
+            timerState != null && timerExpanded -> {
+                val t = timerState!!
+                v.showActions(
+                    R.drawable.ic_timer,
+                    if (t.kind == TimerKind.STOPWATCH) BLUE else ORANGE,
+                    timerTitle(t), timerText(t), timerActions(t),
+                )
+            }
             n != null && n.liveKind == LiveKind.CALL ->
                 v.showNotification(n, expanded = true, actions = notificationActions(n, true), controls = true)
-            n != null -> v.showLiveActivity(n.liveKind, n.title, clockText(n))
+            // A message or recording card shows its app's icon in the pill: the generic
+            // glyph made every chat message look like the charging pill.
+            n != null -> v.showLiveActivity(
+                n.liveKind, n.title, clockText(n),
+                badge = n.appIcon.takeIf { n.liveKind == LiveKind.ACTIVITY || n.liveKind == LiveKind.NONE },
+            )
+            timerState != null -> {
+                val t = timerState!!
+                v.showLiveActivity(LiveKind.TIMER, timerTitle(t), timerText(t))
+            }
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked", st.icon)
+            hotspotOn && hotspotExpanded -> v.showActions(
+                R.drawable.ic_hotspot, GREEN, "Hotspot",
+                (p?.hotspotClients ?: 0).let { if (it > 0) "$it connected" else "On" },
+                hotspotActions(),
+            )
             hotspotOn -> v.showHotspot(p?.hotspotClients ?: 0)
             st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
             c != null -> if (chargeExpanded) showBatteryCard(v, c.first, c.second) else v.showCharging(c.first, c.second)
@@ -1135,10 +1306,17 @@ class IslandService : AccessibilityService(),
         if (v.mode == Mode.MEDIA) handler.post(progressTick)
         handler.removeCallbacks(liveTick)
         if (n != null && n.chronometerBase > 0L) handler.postDelayed(liveTick, 1000)
+        // The island's own clock ticks itself; a countdown needs the finer step
+        // so it never skips the second it actually runs out.
+        handler.removeCallbacks(timerTick)
+        timerState?.takeIf { it.running }?.let { t ->
+            handler.postDelayed(timerTick, if (t.kind == TimerKind.STOPWATCH) 1000L else 500L)
+        }
         updateVisibility()
     }
 
     private var chargeExpanded = false
+    private var hotspotExpanded = false
 
     /** Charging pill, expanded: current draw, temperature and time-to-full. */
     /** Send a canned RemoteInput reply through the notification's own action. */
@@ -1237,8 +1415,65 @@ class IslandService : AccessibilityService(),
             if (energyCounter != Long.MIN_VALUE && energyCounter > 0) add("energy %d nWh".format(energyCounter))
         }
         v.showActions(
-            R.drawable.ic_battery, if (isCharging) GREEN else WHITE, "Battery", parts.joinToString(" · "), emptyList(),
+            R.drawable.ic_battery, if (isCharging) GREEN else WHITE, "Battery", parts.joinToString(" · "),
+            batteryActions(),
         )
+    }
+
+    /** Buttons for an expanded status pill: its settings screen, then Hide. */
+    private fun statusActions(st: Status): List<IslandView.Action> {
+        val bluetooth = st.icon == R.drawable.ic_headphones || st.icon == R.drawable.ic_bluetooth
+        val (label, action) = when {
+            st.title == "Brightness" -> "Display" to android.provider.Settings.ACTION_DISPLAY_SETTINGS
+            st.title == "Volume" -> "Sound" to android.provider.Settings.ACTION_SOUND_SETTINGS
+            bluetooth -> "Bluetooth" to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS
+            st.title == "Face ID" -> return listOf(statusHide)
+            else -> "Settings" to android.provider.Settings.ACTION_SETTINGS
+        }
+        return listOf(
+            IslandView.Action(label, null, R.drawable.ic_open) { openSettings(Intent(action)) },
+            statusHide,
+        )
+    }
+
+    private val statusHide = IslandView.Action("Hide", null, 0) {
+        handler.removeCallbacks(clearStatus)
+        statusExpanded = false
+        clearStatus.run()
+    }
+
+    /** Buttons for the expanded charging card. */
+    private fun batteryActions(): List<IslandView.Action> = listOf(
+        IslandView.Action("Usage", null, R.drawable.ic_battery) {
+            openSettings(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
+        },
+        IslandView.Action("Hide", null, 0) {
+            handler.removeCallbacks(clearCharge)
+            chargeExpanded = false
+            clearCharge.run()
+        },
+    )
+
+    /** Buttons for the expanded hotspot card. */
+    private fun hotspotActions(): List<IslandView.Action> = listOf(
+        IslandView.Action("Settings", null, R.drawable.ic_open) {
+            openSettings(Intent("android.settings.TETHER_SETTINGS"))
+        },
+        IslandView.Action("Hide", null, 0) {
+            hotspotExpanded = false
+            render()
+        },
+    )
+
+    /** Open a settings screen, falling back to the main Settings app. */
+    private fun openSettings(intent: Intent) {
+        runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .recoverCatching {
+                startActivity(
+                    Intent(android.provider.Settings.ACTION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
     }
 
     private fun updateVisibility() {
@@ -1273,15 +1508,36 @@ class IslandService : AccessibilityService(),
     /** Tapping the bubble opens that event's card as the primary pill. */
     override fun onSecondaryTap() {
         when (lastSecondary) {
-            IslandView.SecondaryKind.MEDIA -> if (media != null) mediaExpanded = true
-            IslandView.SecondaryKind.CHARGING -> chargeExpanded = true
+            IslandView.SecondaryKind.MEDIA -> {
+                if (media == null) return
+                mediaExpanded = true
+            }
+            IslandView.SecondaryKind.CHARGING -> {
+                if (charge == null) return
+                chargeExpanded = true
+            }
+            // The bubble opens the same thing its pill would: the hotspot card with
+            // its buttons, not a dead tap.
+            IslandView.SecondaryKind.HOTSPOT -> {
+                if (hotspot?.hotspotOn != true) return
+                hotspotExpanded = true
+            }
             IslandView.SecondaryKind.TIMER,
+            IslandView.SecondaryKind.STATUS,
+            -> when {
+                // A timer the island runs itself is opened as its card with the
+                // Start / Pause · Reset · Stop buttons.
+                timerState != null -> timerExpanded = true
+                notif != null -> liveExpanded = true
+                status != null -> statusExpanded = true
+                else -> return
+            }
             IslandView.SecondaryKind.NAV,
             IslandView.SecondaryKind.CALL,
-            IslandView.SecondaryKind.STATUS,
-            -> if (notif != null || status != null) liveExpanded = true
-            IslandView.SecondaryKind.HOTSPOT, IslandView.SecondaryKind.NONE -> return
+            -> if (notif != null) liveExpanded = true else return
+            IslandView.SecondaryKind.NONE -> return
         }
+        island?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         render()
     }
 
@@ -1409,12 +1665,31 @@ class IslandService : AccessibilityService(),
                 if (liveExpanded) openNotification(n) else expandNotification(n, controls = false)
             }
             // A live pill (timer, call, navigation) opens into its card.
-            Mode.LIVE -> notif?.let { expandNotification(it, controls = false) }
-            Mode.ACTIONS -> {
-                if (statusExpanded) {
+            Mode.LIVE -> when {
+                timerState != null -> {
+                    timerExpanded = !timerExpanded
+                    render()
+                }
+                else -> notif?.let { expandNotification(it, controls = false) }
+            }
+            Mode.ACTIONS -> when {
+                statusExpanded -> {
                     statusExpanded = false
                     render()
-                } else {
+                }
+                hotspotExpanded -> {
+                    hotspotExpanded = false
+                    render()
+                }
+                chargeExpanded -> {
+                    chargeExpanded = false
+                    render()
+                }
+                card == null && timerExpanded -> {
+                    timerExpanded = false
+                    render()
+                }
+                else -> {
                     handler.removeCallbacks(clearCard)
                     card = null
                     render()
@@ -1430,17 +1705,9 @@ class IslandService : AccessibilityService(),
                 render()
             }
             Mode.HOTSPOT -> {
-                // Open the system hotspot / tethering settings when possible.
-                runCatching {
-                    startActivity(
-                        Intent("android.settings.TETHER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }.recoverCatching {
-                    startActivity(
-                        Intent(android.provider.Settings.ACTION_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
+                // Open the hotspot card: device count plus its own buttons.
+                hotspotExpanded = true
+                render()
             }
             Mode.DROP -> Unit
             Mode.CHARGING -> {
@@ -1474,7 +1741,7 @@ class IslandService : AccessibilityService(),
         }
     }
 
-    /** Long-press with nothing else to do: offer timers you can actually start. */
+    /** Long-press with nothing else to do: timers and a stopwatch to start. */
     private fun showTimerPresets() {
         val presets = listOf("5 min" to 5, "10 min" to 10, "25 min" to 25)
         card = Card(
@@ -1484,28 +1751,14 @@ class IslandService : AccessibilityService(),
             text = "Start a timer",
             actions = presets.map { (label, minutes) ->
                 IslandView.Action(label, null, 0) { startTimer(minutes) }
-            },
+            } + IslandView.Action("Stopwatch", null, 0) { startStopwatch() },
         )
         render()
         handler.removeCallbacks(clearCard)
         handler.postDelayed(clearCard, 8000)
     }
 
-    private fun startTimer(minutes: Int) {
-        card = null
-        render()
-        runCatching {
-            startActivity(
-                Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
-                    .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, minutes * 60)
-                    .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Island timer")
-                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }.onFailure {
-            showStatus(Status(R.drawable.ic_timer, ORANGE, "Timer", "No clock app", GREY))
-        }
-    }
+    private fun startTimer(minutes: Int) = startTimerClock(minutes)
 
     override fun onSwipeUp() {
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "swipe up")
@@ -1612,7 +1865,10 @@ class IslandService : AccessibilityService(),
             }
             Mode.NOTIFICATION -> {
                 val n = notif ?: return false
-                v.showLiveActivity(n.liveKind, n.title, n.text)
+                v.showLiveActivity(
+                    n.liveKind, n.title, n.text,
+                    badge = n.appIcon.takeIf { n.liveKind == LiveKind.ACTIVITY || n.liveKind == LiveKind.NONE },
+                )
             }
             Mode.HOTSPOT -> {
                 if (!hotspotOn) return false
@@ -1642,6 +1898,18 @@ class IslandService : AccessibilityService(),
         if (card != null && SystemClock.uptimeMillis() - lastCopiedAt > 700) {
             handler.removeCallbacks(clearCard)
             card = null
+            changed = true
+        }
+        if (hotspotExpanded) {
+            hotspotExpanded = false
+            changed = true
+        }
+        if (chargeExpanded) {
+            chargeExpanded = false
+            changed = true
+        }
+        if (timerExpanded) {
+            timerExpanded = false
             changed = true
         }
         // Touching the app below folds an open live card back.
@@ -1777,6 +2045,11 @@ class IslandService : AccessibilityService(),
         status = null
         card = null
         mediaExpanded = false
+        hotspotExpanded = false
+        chargeExpanded = false
+        timerState = null
+        timerExpanded = false
+        handler.removeCallbacks(timerTick)
         faceScanActive = false
         render()
     }
@@ -1828,6 +2101,8 @@ class IslandService : AccessibilityService(),
         val BOUNCER_CLASS = Regex("(?i)(pin|password|pattern|bouncer|numpad|passcode)")
         /** An opened card stays this long while you read it. */
         const val EXPANDED_HOLD_MS = 9000L
+        /** How long a call / timer pill survives its notification being cancelled. */
+        const val REMOVE_GRACE_MS = 3000L
         val COPY_WORD = Regex("\\bcopy\\b")
         const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
