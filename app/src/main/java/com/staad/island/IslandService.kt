@@ -1739,9 +1739,11 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         val n = notif
         when {
-            // The tap already opened every button, so a long-press adds nothing
-            // here (and must not open the timer card over a notification).
-            n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) -> Unit
+            // A tap already opens every button, so the long-press is free: it
+            // offers the timer / stopwatch card instead of doing nothing.
+            n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) -> {
+                if (!liveExpanded) showTimerPresets()
+            }
             // Long-press always offers to start something new: the presets card
             // with 5/10/25 min and the stopwatch. A running timer's own card
             // (Start/Pause · Reset · Stop) is one tap on its pill.
