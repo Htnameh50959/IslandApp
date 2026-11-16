@@ -51,6 +51,7 @@
         <item name="android:orientation">vertical</item>
         <item name="android:background">@drawable/card</item>
         <item name="android:clipToOutline">true</item>
+        <item name="android:elevation">2dp</item>
     </style>
     <style name="Row">
         <item name="android:layout_width">match_parent</item>
