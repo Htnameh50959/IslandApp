@@ -1742,14 +1742,9 @@ class IslandService : AccessibilityService(),
             // The tap already opened every button, so a long-press adds nothing
             // here (and must not open the timer card over a notification).
             n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) -> Unit
-            // A timer or stopwatch is already running: long-press opens its own
-            // card (Start/Pause · Reset · Stop), not the card for starting a new one.
-            timerState != null && v.mode != Mode.MEDIA -> {
-                timerExpanded = true
-                render()
-            }
-            // Tapping the music pill already opens the player, so the long-press
-            // there is free: it opens the timer / stopwatch card.
+            // Long-press always offers to start something new: the presets card
+            // with 5/10/25 min and the stopwatch. A running timer's own card
+            // (Start/Pause · Reset · Stop) is one tap on its pill.
             media != null && cfg.media && v.mode != Mode.MEDIA -> showTimerPresets()
             // Already on the player: switch to the phone's other active session
             // (podcast vs music) instead of doing nothing.
