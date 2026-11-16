@@ -13,6 +13,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
+import android.net.Uri
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.Resources
@@ -26,6 +28,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.DragEvent
@@ -43,7 +46,9 @@ import android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
 import android.view.WindowManager.LayoutParams.WRAP_CONTENT
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.staad.island.IslandView.Mode
+import com.staad.island.IslandView.SecondaryKind
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -99,6 +104,7 @@ class IslandService : AccessibilityService(),
     private var lastClipStamp = -1L
     /** Text in System UI's "copied" preview, so one preview counts as one copy. */
     private var lastPreviewText: String? = null
+    private var brightnessObserver: ContentObserver? = null
     private val copyLabels by lazy {
         setOf("copy", runCatching { Resources.getSystem().getString(android.R.string.copy) }.getOrDefault("Copy"))
             .map { it.lowercase() }.toSet()
@@ -133,6 +139,29 @@ class IslandService : AccessibilityService(),
     }
     private val clearCard = Runnable { card = null; render() }
     private val collapseMedia = Runnable { mediaExpanded = false; render() }
+    /** A timer / stopwatch notification only carries a base time: tick it here. */
+    private val liveTick = object : Runnable {
+        override fun run() {
+            val n = notif ?: return
+            if (n.chronometerBase <= 0L) return
+            render()
+        }
+    }
+
+    /** "03:58" / "1:02:59" for a running timer or stopwatch. */
+    private fun clockText(n: NotifEvent): String {
+        val base = n.chronometerBase
+        if (base <= 0L) return n.text
+        // A base in the 10^12 range is a date (wall clock), anything smaller is elapsedRealtime.
+        val now = if (base > 1_000_000_000_000L) System.currentTimeMillis() else SystemClock.elapsedRealtime()
+        val ms = if (n.chronometerCountDown) base - now else now - base
+        val total = (ms / 1000L).coerceAtLeast(0L)
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+    }
+
     private val progressTick = object : Runnable {
         override fun run() {
             val m = media ?: return
@@ -159,16 +188,19 @@ class IslandService : AccessibilityService(),
         override fun onReceive(context: Context, intent: Intent) {
             // Each wake is a good moment to check notifications still reach the island.
             if (intent.action == Intent.ACTION_SCREEN_ON) ensureNotificationListener()
-            if (!cfg.statusPopups || isInitialStickyBroadcast) return
+            // ACTION_SCREEN_ON is a sticky broadcast; its initial delivery has
+            // isInitialStickyBroadcast=true and must not be skipped, or Face ID
+            // scanning never starts on the first wake after the receiver binds.
+            if (!cfg.statusPopups && intent.action != Intent.ACTION_SCREEN_ON) return
+            if (isInitialStickyBroadcast && intent.action != Intent.ACTION_SCREEN_ON) return
             when (intent.action) {
                 BluetoothDevice.ACTION_ACL_CONNECTED -> onBluetooth(intent, connected = true)
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> onBluetooth(intent, connected = false)
                 ACTION_BT_BATTERY -> onBluetoothBattery(intent)
                 Intent.ACTION_SCREEN_ON -> if (cfg.faceId) {
+                    android.util.Log.d("IslandFaceID", "ACTION_SCREEN_ON received, calling maybeStartFaceScan")
                     screenOnAt = SystemClock.uptimeMillis()
                     unlockShown = false
-                    // Only while the lock screen is up and face unlock is enabled —
-                    // never on a normal wake of an already-unlocked phone.
                     maybeStartFaceScan()
                     watchForUnlock()
                 }
@@ -299,7 +331,18 @@ class IslandService : AccessibilityService(),
             }
         }
         runCatching { getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
+        registerBrightnessObserver()
         Prefs.get(this).registerOnSharedPreferenceChangeListener(this)
+        // Already plugged in when the island came up (after a reboot, or while the
+        // service was off): without this the charging event never existed.
+        runCatching {
+            val bm = getSystemService(BatteryManager::class.java)
+            if (bm?.isCharging == true) {
+                val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                charge = level to true
+                handler.postDelayed(clearCharge, 3500)
+            }
+        }
         hotspot = HotspotMonitor(this) { render() }.also { it.start() }
         IslandBus.listener = this // replays current media state → render()
         ensureNotificationListener()
@@ -369,10 +412,15 @@ class IslandService : AccessibilityService(),
     }.getOrDefault(false)
 
     private fun maybeStartFaceScan() {
-        if (!cfg.faceId || !faceUnlockOn()) return
-        val km = getSystemService(KeyguardManager::class.java) ?: return
-        if (km.isKeyguardLocked != true) return
+        android.util.Log.d("IslandFaceID", "maybeStartFaceScan called cfg.faceId=$cfg.faceId faceScanActive=$faceScanActive")
+        if (!cfg.faceId) return
         faceScanActive = true
+        startFaceScan()
+        watchForUnlock()
+    }
+
+    private fun startFaceScan() {
+        android.util.Log.d("IslandFaceID", "startFaceScan showing scanning pill")
         showStatus(Status(R.drawable.ic_face_scan, WHITE, "Face ID", "Scanning", GREY), 5000)
     }
 
@@ -468,12 +516,11 @@ class IslandService : AccessibilityService(),
 
     private val keyguardListener = KeyguardManager.KeyguardLockedStateListener { locked ->
         if (!cfg.faceId) return@KeyguardLockedStateListener
+        android.util.Log.d("IslandFaceID", "keyguardListener locked=$locked faceScanActive=$faceScanActive")
         if (locked) {
             unlockShown = false
-            // Lock screen came up (timeout / power) — start scanning if face unlock is on.
-            if (SystemClock.uptimeMillis() - screenOnAt < 2500 || getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
-                maybeStartFaceScan()
-            }
+            screenOnAt = SystemClock.uptimeMillis()
+            maybeStartFaceScan()
         } else {
             finishFaceScan(unlocked = true)
         }
@@ -485,11 +532,30 @@ class IslandService : AccessibilityService(),
      * permission and does not guess from the package name.
      */
     private fun isImmersive(): Boolean = runCatching {
-        val win = windows.firstOrNull { it.isActive } ?: return@runCatching false
+        // Only an app window can be fullscreen: the shade, the lock screen and
+        // the status bar are TYPE_SYSTEM and cover the screen too, but pulling
+        // down the control centre must not hide the island.
+        val win = windows.firstOrNull {
+            it.isActive && it.type == AccessibilityWindowInfo.TYPE_APPLICATION
+        } ?: return@runCatching false
         val b = Rect()
         win.getBoundsInScreen(b)
         val dm = resources.displayMetrics
-        b.top <= 0 && b.left <= 0 && b.width() >= dm.widthPixels - 2 && b.height() >= dm.heightPixels - 2
+        val fills = b.top <= 0 && b.left <= 0 &&
+            b.width() >= dm.widthPixels - 2 && b.height() >= dm.heightPixels - 2
+        if (!fills) return@runCatching false
+        // Filling the screen is not enough: modern launchers and edge-to-edge
+        // apps do too. Only count it when the status bar itself is gone.
+        val sb = statusBarHeight()
+        val barVisible = windows.any { w ->
+            if (w === win) return@any false
+            runCatching {
+                val r = Rect()
+                w.getBoundsInScreen(r)
+                r.top <= 0 && r.height() in 1..(sb + 6) && r.width() >= dm.widthPixels - 4
+            }.getOrDefault(false)
+        }
+        !barVisible
     }.getOrDefault(false)
 
     private fun trackForeground(e: AccessibilityEvent) {
@@ -769,6 +835,7 @@ class IslandService : AccessibilityService(),
 
     private fun teardown() {
         if (IslandBus.listener === this) IslandBus.listener = null
+        handler.removeCallbacks(liveTick)
         handler.removeCallbacksAndMessages(null)
         if (receiverRegistered) {
             runCatching { unregisterReceiver(powerReceiver) }
@@ -780,6 +847,7 @@ class IslandService : AccessibilityService(),
         }
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(this)
         runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
+        unregisterBrightnessObserver()
         hotspot?.stop()
         hotspot = null
         island?.let { v -> runCatching { wm?.removeView(v) } }
@@ -854,6 +922,14 @@ class IslandService : AccessibilityService(),
     /** The pill folds back on its own; one with more to read stays a little longer. */
     private fun armNotifTimeout(event: NotifEvent) {
         handler.removeCallbacks(clearNotif)
+        // An activity that is still running (timer, call, navigation, stopwatch)
+        // stays on the island until its notification goes away: folding it back
+        // after a few seconds would hide the countdown that is the whole point.
+        val ongoing = event.chronometerBase > 0L ||
+            event.liveKind == LiveKind.CALL ||
+            event.liveKind == LiveKind.TIMER ||
+            event.liveKind == LiveKind.NAVIGATION
+        if (ongoing) return
         handler.postDelayed(clearNotif, if (event.text.length > 60) 6000L else 4500L)
     }
 
@@ -939,8 +1015,12 @@ class IslandService : AccessibilityService(),
 
     private fun render() {
         val v = island ?: return
+        // Apply the user-chosen accent override (0 = auto) so every pill drawn this
+        // pass uses the configured colour instead of the album / app colour.
+        v.accentOverride = cfg.accentColor
         val preview = previewMode
         if (preview != null && SystemClock.uptimeMillis() < previewUntil) {
+            v.setSecondaryBubble(IslandView.SecondaryKind.NONE, false)
             renderPreview(v, preview)
             updateVisibility()
             return
@@ -967,7 +1047,69 @@ class IslandService : AccessibilityService(),
             }
             swipeFocus = null
         }
-        v.setStrip(hotspotOn, p?.hotspotClients ?: 0, c)
+        // Dual layout: primary + secondary bubble when two compatible activities are active (compact only).
+        // Priority (per spec): CALL P0 > NAV / media / recording P1 > timer P2 > charging / hotspot P3.
+        // The primary pill is whatever the render block below decides to show; the bubble is the
+        // highest-priority *other* active event beside it. A call always takes over as the expanded
+        // primary card, so it never appears as a bubble beside another pill.
+        var secondary = SecondaryKind.NONE
+        var secondaryPlaying = false
+        if (focus == null && k == null && !dropActive && !mediaExpanded && !liveExpanded && !statusExpanded) {
+            // Mirror the render `when` order so the bubble never duplicates the primary pill.
+            val primaryKind = when {
+                n != null && !(n.liveKind == LiveKind.CALL) -> when (n.liveKind) {
+                    LiveKind.TIMER -> SecondaryKind.TIMER
+                    LiveKind.NAVIGATION -> SecondaryKind.NAV
+                    LiveKind.ACTIVITY, LiveKind.NONE -> SecondaryKind.STATUS
+                    LiveKind.CALL -> SecondaryKind.CALL // unreachable due to the guard above
+                }
+                hotspotOn -> SecondaryKind.HOTSPOT                                          // hotspot pill
+                st != null -> SecondaryKind.STATUS                                          // status pill
+                c != null && !chargeExpanded -> SecondaryKind.CHARGING                      // charging pill
+                m != null && m.playing -> SecondaryKind.MEDIA                               // media pill
+                else -> SecondaryKind.NONE
+            }
+
+            val hasTimer = n != null && n.liveKind == LiveKind.TIMER
+            val hasNav = n != null && n.liveKind == LiveKind.NAVIGATION
+            val hasOtherLive = n != null && n.liveKind == LiveKind.ACTIVITY // voice / screen recording
+            val hasMedia = m != null && m.playing
+            val hasCharge = c != null && !chargeExpanded
+            val hasHotspot = hotspotOn && (n == null || !liveExpanded)
+
+            /** Priority rank: lower = more important / shown as primary first. */
+            fun prio(kind: SecondaryKind): Int = when (kind) {
+                SecondaryKind.CALL -> 0
+                SecondaryKind.MEDIA, SecondaryKind.NAV, SecondaryKind.STATUS -> 1
+                SecondaryKind.TIMER -> 2
+                SecondaryKind.CHARGING, SecondaryKind.HOTSPOT -> 3
+                SecondaryKind.NONE -> 9
+            }
+
+            // Candidates: any active event whose kind differs from the primary pill this pass.
+            val candidates = mutableListOf<SecondaryKind>()
+            if (hasMedia && primaryKind != SecondaryKind.MEDIA) candidates += SecondaryKind.MEDIA
+            if (hasNav && primaryKind != SecondaryKind.NAV) candidates += SecondaryKind.NAV
+            if (hasOtherLive && primaryKind != SecondaryKind.STATUS) candidates += SecondaryKind.STATUS
+            if (hasTimer && primaryKind != SecondaryKind.TIMER) candidates += SecondaryKind.TIMER
+            if (hasCharge && primaryKind != SecondaryKind.CHARGING) candidates += SecondaryKind.CHARGING
+            if (hasHotspot && primaryKind != SecondaryKind.HOTSPOT) candidates += SecondaryKind.HOTSPOT
+
+            // Highest-priority candidate becomes the bubble beside the primary pill.
+            secondary = candidates.minByOrNull { prio(it) } ?: SecondaryKind.NONE
+            secondaryPlaying = (secondary == SecondaryKind.MEDIA && m?.playing == true)
+        }
+        // Don't show a bubble alongside an expanded card.
+        if (mediaExpanded || liveExpanded || statusExpanded) secondary = SecondaryKind.NONE
+        lastSecondary = secondary
+        // A charging / hotspot indicator that the bubble already shows must not be
+        // repeated inside the main pill's strip.
+        v.setStrip(
+            hotspot = hotspotOn && secondary != IslandView.SecondaryKind.HOTSPOT,
+            clients = p?.hotspotClients ?: 0,
+            charge = if (secondary == IslandView.SecondaryKind.CHARGING) null else c,
+        )
+        v.setSecondaryBubble(secondary, secondaryPlaying)
         when {
             dropActive -> v.showDropTarget(dropHover)
             k != null -> v.showActions(k.badge, k.tint, k.kind, k.text, k.actions)
@@ -978,7 +1120,7 @@ class IslandService : AccessibilityService(),
             // are one tap away instead of hiding behind a long-press.
             n != null && n.liveKind == LiveKind.CALL ->
                 v.showNotification(n, expanded = true, actions = notificationActions(n, true), controls = true)
-            n != null -> v.showLiveActivity(n.liveKind, n.title, n.text)
+            n != null -> v.showLiveActivity(n.liveKind, n.title, clockText(n))
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked", st.icon)
             hotspotOn -> v.showHotspot(p?.hotspotClients ?: 0)
             st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
@@ -991,6 +1133,8 @@ class IslandService : AccessibilityService(),
         }
         handler.removeCallbacks(progressTick)
         if (v.mode == Mode.MEDIA) handler.post(progressTick)
+        handler.removeCallbacks(liveTick)
+        if (n != null && n.chronometerBase > 0L) handler.postDelayed(liveTick, 1000)
         updateVisibility()
     }
 
@@ -1036,20 +1180,64 @@ class IslandService : AccessibilityService(),
 
     private fun showBatteryCard(v: IslandView, level: Int, plugged: Boolean) {
         val bm = getSystemService(BatteryManager::class.java)
-        val microAmps = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
-        val chargeUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: Int.MIN_VALUE
         val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
-        val hours = if (microAmps > 0 && chargeUah > 0) chargeUah.toFloat() / microAmps else -1f
+        val tempTenths = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+        val voltageMv = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val chargePlug = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val currentNow = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
+        val currentAvg = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) ?: Int.MIN_VALUE
+        val chargeCounter = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: Int.MIN_VALUE
+        val energyCounter = if (Build.VERSION.SDK_INT >= 28) {
+            try { bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER) ?: Long.MIN_VALUE } catch (_: Exception) { Long.MIN_VALUE }
+        } else Long.MIN_VALUE
+
+        // CURRENT_NOW units vary by device (often µA, sometimes mA). Normalize to mA-ish for display.
+        fun normMa(v: Int): Float {
+            val a = abs(v).toFloat()
+            return if (a > 10000f) a / 1000f else a
+        }
+        val curMa = when {
+            currentNow != Int.MIN_VALUE && currentNow != 0 -> normMa(currentNow)
+            currentAvg != Int.MIN_VALUE && currentAvg != 0 -> normMa(currentAvg)
+            else -> Float.NaN
+        }
+        val watts = if (!curMa.isNaN() && voltageMv > 0) (curMa / 1000f) * (voltageMv / 1000f) else Float.NaN
+
+        val isCharging = plugged || status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        val fast = isCharging && ((watts.isFinite() && watts >= 15f) || (!curMa.isNaN() && curMa >= 3000f))
+
+        // Time to full estimate (very rough): charge counter is usually µAh remaining; if unavailable, skip.
+        val hoursLeft = if (isCharging && curMa.isFinite() && curMa > 50f && chargeCounter > 0) {
+            // If chargeCounter looks like µAh, convert to mAh; some devices report remaining differently.
+            val cc = abs(chargeCounter).toFloat()
+            val remainingMah = if (cc > 100000f) cc / 1000f else cc
+            (remainingMah / curMa).takeIf { it in 0f..48f }
+        } else null
+
+        val plugLabel = when (chargePlug) {
+            BatteryManager.BATTERY_PLUGGED_USB -> "USB"
+            BatteryManager.BATTERY_PLUGGED_AC -> "AC"
+            BatteryManager.BATTERY_PLUGGED_WIRELESS -> "Wireless"
+            else -> null
+        }
 
         val parts = buildList {
-            add(if (plugged) "$level% · charging" else "$level%")
-            if (microAmps != Int.MIN_VALUE) add("%.0f mA".format(abs(microAmps) / 1000f))
-            if (temp != Int.MIN_VALUE) add("%.1f °C".format(temp / 10f))
-            if (hours > 0f) add("~%dh %02dm to full".format(hours.toInt(), ((hours % 1) * 60).toInt()))
+            val head = buildString {
+                append("$level%")
+                if (isCharging) append(if (fast) " · fast charging" else " · charging")
+                if (plugLabel != null && isCharging) append(" ($plugLabel)")
+            }
+            add(head)
+            if (curMa.isFinite()) {
+                if (watts.isFinite()) add("%.0f mA · %.1f W".format(curMa, watts)) else add("%.0f mA".format(curMa))
+            }
+            if (tempTenths != Int.MIN_VALUE) add("%.1f °C".format(tempTenths / 10f))
+            hoursLeft?.let { h -> add("~%dh %02dm to full".format(h.toInt(), ((h % 1f) * 60).toInt())) }
+            if (energyCounter != Long.MIN_VALUE && energyCounter > 0) add("energy %d nWh".format(energyCounter))
         }
         v.showActions(
-            R.drawable.ic_battery, GREEN, "Battery", parts.joinToString(" · "), emptyList(),
+            R.drawable.ic_battery, if (isCharging) GREEN else WHITE, "Battery", parts.joinToString(" · "), emptyList(),
         )
     }
 
@@ -1057,10 +1245,44 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         val lp = params ?: return
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val blocked = foregroundPkg in cfg.hiddenApps || (cfg.hideImmersive && isImmersive())
+        val blocked = foregroundPkg in cfg.hiddenApps || (cfg.hideImmersive && isImmersive() && !faceScanActive)
         val visible = cfg.enabled && !blocked && !(landscape && cfg.hideLandscape)
-        v.visibility = if (visible) View.VISIBLE else View.GONE
-        if (!visible) onTouchArea(null)
+        // Never set the view GONE: that destroys the window's surface, and the
+        // next appearance (a face scan, a volume press) then shows up late and
+        // its first frames can be garbage. Park the window off-screen instead.
+        v.visibility = View.VISIBLE
+        if (visible) {
+            if (windowParked) {
+                windowParked = false
+                applyPosition()
+            }
+        } else {
+            if (!windowParked) {
+                windowParked = true
+                lp.y = -lp.height - 200
+                updateWindow()
+            }
+            onTouchArea(null)
+        }
+    }
+
+    private var windowParked = false
+    /** What the companion bubble currently stands for (set by render). */
+    private var lastSecondary = IslandView.SecondaryKind.NONE
+
+    /** Tapping the bubble opens that event's card as the primary pill. */
+    override fun onSecondaryTap() {
+        when (lastSecondary) {
+            IslandView.SecondaryKind.MEDIA -> if (media != null) mediaExpanded = true
+            IslandView.SecondaryKind.CHARGING -> chargeExpanded = true
+            IslandView.SecondaryKind.TIMER,
+            IslandView.SecondaryKind.NAV,
+            IslandView.SecondaryKind.CALL,
+            IslandView.SecondaryKind.STATUS,
+            -> if (notif != null || status != null) liveExpanded = true
+            IslandView.SecondaryKind.HOTSPOT, IslandView.SecondaryKind.NONE -> return
+        }
+        render()
     }
 
     // The island settled somewhere (or is moving / hidden: null). Put the
@@ -1071,7 +1293,7 @@ class IslandService : AccessibilityService(),
         val pad = touchPad ?: return
         val tp = touchParams ?: return
         val dp = params ?: return
-        val usable = area?.takeIf { island?.visibility == View.VISIBLE && !it.isEmpty }
+        val usable = area?.takeIf { !windowParked && !it.isEmpty }
         touchArea = usable
         if (usable == null) {
             if (tp.x != PARKED || tp.width != 1) {
@@ -1438,6 +1660,43 @@ class IslandService : AccessibilityService(),
         rearmMediaCollapse()
     }
 
+    private fun registerBrightnessObserver() {
+        if (brightnessObserver != null) return
+        val obs = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) { showBrightness() }
+        }
+        try {
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS), false, obs
+            )
+            brightnessObserver = obs
+        } catch (_: Exception) { }
+    }
+
+    private fun unregisterBrightnessObserver() {
+        val obs = brightnessObserver ?: return
+        try { contentResolver.unregisterContentObserver(obs) } catch (_: Exception) { }
+        brightnessObserver = null
+    }
+
+    private fun showBrightness() {
+        if (!IslandConfig.load(this).brightnessPill) return
+        try {
+            val cur = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+            val pct = (cur * 100 / 255).coerceIn(0, 100)
+            showStatus(
+                Status(
+                    R.drawable.ic_bell,
+                    0xFFFFCC00.toInt(),
+                    "Brightness",
+                    "$pct%",
+                    0xFFFFFFFF.toInt(),
+                ),
+                1500,
+            )
+        } catch (_: Exception) { }
+    }
+
     /**
      * Volume keys: draw the level as a pill.
      *
@@ -1455,6 +1714,7 @@ class IslandService : AccessibilityService(),
     }
 
     private fun showVolume() {
+        if (!IslandConfig.load(this).volumePill) return
         val am = getSystemService(AudioManager::class.java) ?: return
         val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         val level = am.getStreamVolume(AudioManager.STREAM_MUSIC)

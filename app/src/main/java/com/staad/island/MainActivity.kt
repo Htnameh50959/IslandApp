@@ -65,6 +65,9 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swFaceId, Prefs.FACE_ID, d.faceId)
         bindSwitch(R.id.swGlow, Prefs.GLOW, d.glow)
         bindSwitch(R.id.swImmersive, Prefs.HIDE_IMMERSIVE, d.hideImmersive)
+        bindSwitch(R.id.swVolumePill, Prefs.VOLUME_PILL, d.volumePill)
+        bindSwitch(R.id.swBrightnessPill, Prefs.BRIGHTNESS_PILL, d.brightnessPill)
+        findViewById<View>(R.id.btnAccentColor).setOnClickListener { pickAccentColor() }
         bindSwitch(R.id.swClipHistory, Prefs.CLIP_HISTORY, d.clipHistory)
         bindSwitch(R.id.swQuickReplies, Prefs.QUICK_REPLIES, d.quickReplies)
         findViewById<TextView>(R.id.fitInfo).text = cameraInfo()
@@ -99,6 +102,15 @@ class MainActivity : Activity() {
         }
         findViewById<View>(R.id.btnVideoApps).setOnClickListener {
             pickApps("Treat as video apps", Prefs.VIDEO_APPS) { updateVideoInfo() }
+        }
+        findViewById<View?>(R.id.btnCallApps)?.setOnClickListener {
+            pickApps("Treat as call apps", Prefs.CALL_APPS) { updateCallInfo() }
+        }
+        findViewById<View?>(R.id.btnNavApps)?.setOnClickListener {
+            pickApps("Treat as navigation apps", Prefs.NAV_APPS) { updateNavInfo() }
+        }
+        findViewById<View?>(R.id.btnTimerApps)?.setOnClickListener {
+            pickApps("Treat as timer apps", Prefs.TIMER_APPS) { updateTimerInfo() }
         }
         findViewById<View>(R.id.btnClipHistory).setOnClickListener { showClipHistory() }
         findViewById<View>(R.id.btnCannedReplies).setOnClickListener { editCannedReplies() }
@@ -208,6 +220,39 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.cannedInfo).text = "$n repl${if (n == 1) "y" else "ies"}"
     }
 
+    /** Preset accent colours the user can force on every pill (0 = auto from album / app). */
+    private val ACCENT_PRESETS: List<Pair<String, Int>> = listOf(
+        Pair("Auto", 0),
+        Pair("Blue", 0xFF0A84FF.toInt()),
+        Pair("Green", 0xFF30D158.toInt()),
+        Pair("Red", 0xFFFF3B30.toInt()),
+        Pair("Orange", 0xFFFF9F0A.toInt()),
+        Pair("Purple", 0xFF5E5CE6.toInt()),
+        Pair("Pink", 0xFFFF2D55.toInt()),
+    )
+
+    private fun pickAccentColor() {
+        val current = prefs.getInt(Prefs.ACCENT_COLOR, 0)
+        val names = ACCENT_PRESETS.map { it.first }.toTypedArray()
+        val selected = ACCENT_PRESETS.indexOfFirst { it.second == current }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Accent color")
+            .setSingleChoiceItems(names, selected) { _, which ->
+                prefs.edit().putInt(Prefs.ACCENT_COLOR, ACCENT_PRESETS[which].second).apply()
+                updateAccentInfo()
+                IslandBus.reloadPrefs()
+            }
+            .setPositiveButton("OK", null)
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateAccentInfo() {
+        val current = prefs.getInt(Prefs.ACCENT_COLOR, 0)
+        val name = ACCENT_PRESETS.firstOrNull { it.second == current }?.first ?: "Custom"
+        findViewById<TextView>(R.id.accentInfo).text = name
+    }
+
     private fun updateVideoInfo() {
         val n = prefs.getStringSet(Prefs.VIDEO_APPS, emptySet())?.size ?: 0
         findViewById<TextView>(R.id.videoInfo).text = if (n == 0) {
@@ -224,6 +269,24 @@ class MainActivity : Activity() {
         } else {
             "Hidden over $n app${if (n == 1) "" else "s"}"
         }
+    }
+
+    private fun updateCallInfo() {
+        val n = prefs.getStringSet(Prefs.CALL_APPS, emptySet())?.size ?: 0
+        findViewById<TextView?>(R.id.callAppsInfo)?.text =
+            if (n == 0) "Using built-in call apps" else "$n custom call app${if (n == 1) "" else "s"}"
+    }
+
+    private fun updateNavInfo() {
+        val n = prefs.getStringSet(Prefs.NAV_APPS, emptySet())?.size ?: 0
+        findViewById<TextView?>(R.id.navAppsInfo)?.text =
+            if (n == 0) "Using built-in navigation apps" else "$n custom nav app${if (n == 1) "" else "s"}"
+    }
+
+    private fun updateTimerInfo() {
+        val n = prefs.getStringSet(Prefs.TIMER_APPS, emptySet())?.size ?: 0
+        findViewById<TextView?>(R.id.timerAppsInfo)?.text =
+            if (n == 0) "Using built-in timer apps" else "$n custom timer app${if (n == 1) "" else "s"}"
     }
 
     // ── Settings import / export ─────────────────────────────────────────────
@@ -300,6 +363,9 @@ class MainActivity : Activity() {
         super.onResume()
         updateHiddenInfo()
         updateVideoInfo()
+        updateCallInfo()
+        updateNavInfo()
+        updateTimerInfo()
         updateClipInfo()
         updateCannedInfo()
         val a11y = AccessibilityStatus.isAccessibilityEnabled(this)

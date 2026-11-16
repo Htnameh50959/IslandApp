@@ -33,6 +33,12 @@ data class NotifEvent(
     val replyInput: android.app.RemoteInput? = null,
     /** The app icon's main colour, for the glow. */
     val accent: Int = 0xFFFFFFFF.toInt(),
+    /** Chonometer base (elapsedRealtime) when the notification shows a running clock. */
+    val chronometerBase: Long = 0L,
+    /** True when that clock counts down (a timer) instead of up (a stopwatch). */
+    val chronometerCountDown: Boolean = false,
+    /** The base above is a wall-clock time (System.currentTimeMillis), not elapsedRealtime. */
+    val wallClockBase: Boolean = false,
 )
 
 data class MediaState(
@@ -47,6 +53,10 @@ data class MediaState(
     val speed: Float,
     val controller: MediaController?,
     val packageName: String = "",
+    /** Title of the next track in the queue, when the session provides it. */
+    val nextTrackTitle: String? = null,
+    /** Artist of the next track in the queue, when the session provides it. */
+    val nextTrackArtist: String? = null,
 ) {
     /** True for video apps (YouTube, Netflix, ...): shown as a title + play/pause pill. */
     val isVideo: Boolean get() = packageName in VIDEO_PACKAGES || packageName in IslandBus.videoApps

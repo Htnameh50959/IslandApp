@@ -56,11 +56,14 @@ class HotspotMonitor(
                         ?: intent.getIntExtra(EXTRA_STA_COUNT, -1).takeIf { it >= 0 }
                         ?: intent.getIntExtra("clientNum", -1).takeIf { it >= 0 }
                     if (count != null) {
+                        val wasOn = hotspotOn
                         hotspotOn = true
                         if (count != systemClients) {
                             systemClients = count
-                            notifyChanged()
                         }
+                        // Always notify when hotspot state changes, so the pill appears
+                        // immediately even if the client count hasn't changed.
+                        if (!wasOn) notifyChanged()
                     } else {
                         refreshHotspotState(intent)
                     }

@@ -146,6 +146,19 @@ class IslandNotificationListener : NotificationListenerService() {
             lastAccent = accentOf(art)
         }
         val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+        // Next-track preview: read the first entry from the session's queue, when provided.
+        var nextTitle: String? = null
+        var nextArtist: String? = null
+        try {
+            val queue = c.queue.orEmpty()
+            if (queue.isNotEmpty()) {
+                val nextItem = queue.firstOrNull { it.description != null }
+                nextTitle = nextItem?.description?.title?.toString()
+                nextArtist = nextItem?.description?.subtitle?.toString()
+            }
+        } catch (_: Exception) {
+            // Some sessions don't expose a queue — next-track preview simply stays hidden.
+        }
         IslandBus.postMedia(
             MediaState(
                 title = title,
@@ -159,6 +172,8 @@ class IslandNotificationListener : NotificationListenerService() {
                 speed = st?.playbackSpeed ?: 1f,
                 controller = c,
                 packageName = c.packageName,
+                nextTrackTitle = nextTitle,
+                nextTrackArtist = nextArtist,
             )
         )
     }
@@ -189,8 +204,25 @@ class IslandNotificationListener : NotificationListenerService() {
         val title = rawTitle.ifEmpty { appName }
         if (title.isBlank() && text.isBlank()) return
 
+        // Countdown: use the chronometer extras when present; a desk-clock timer
+        // (vivo / AOSP Clock) only puts its end time in Notification.when.
+        var chronoBase = chronometerBase(n)
+        var chronoCountDown = n.extras.getBoolean(EXTRA_CHRONOMETER_COUNT_DOWN, false)
+        var wallBase = chronoBase > 1_000_000_000_000L
+        if (kind == LiveKind.TIMER && chronoBase <= 0L) {
+            // vivo / AOSP Clock keep the countdown only in their RemoteViews
+            // chronometer widget, so read it from the inflated layout.
+            val fromViews = chronometerFromViews(n)
+            if (fromViews != null) {
+                chronoBase = fromViews.first
+                chronoCountDown = fromViews.second
+                wallBase = chronoBase > 1_000_000_000_000L
+            }
+        }
+
         // Live activities re-post often (elapsed time); refresh only when the text changes.
-        val signature = "$title\u0000$text\u0000$kind"
+        // The clock base is part of the signature so a brand-new timer still arrives.
+        val signature = "$title\u0000$text\u0000$kind\u0000$chronoBase"
         if (lastContent[sbn.key] == signature) return
         if (lastContent.size > 300) lastContent.clear()
         lastContent[sbn.key] = signature
@@ -210,31 +242,81 @@ class IslandNotificationListener : NotificationListenerService() {
                 replyIntent = reply?.first,
                 replyInput = reply?.second,
                 accent = appAccent(sbn.packageName),
+                // A timer / stopwatch carries its clock in the extras: the island
+                // ticks it locally instead of waiting for the next update.
+                chronometerBase = chronoBase,
+                chronometerCountDown = chronoCountDown,
+                wallClockBase = wallBase,
             )
         )
     }
 
+    /**
+     * Base time of a running timer / stopwatch. Some apps put it in the extras,
+     * others only set Notification.when (in elapsedRealtime, which is far below
+     * any wall-clock timestamp).
+     */
+    private fun chronometerBase(n: Notification): Long {
+        val explicit = n.extras.getLong(EXTRA_CHRONOMETER_BASE, 0L)
+        if (explicit > 0L) return explicit
+        val chrono = n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false) ||
+            n.extras.getBoolean(EXTRA_CHRONOMETER_COUNT_DOWN, false)
+        if (!chrono) return 0L
+        // elapsedRealtime is in the millions: anything below 10^12 is not a date.
+        return n.`when`.takeIf { it in 1..999_999_999_999L } ?: 0L
+    }
+
+    /** Base + countdown direction of the first Chronometer inside a notification's layout. */
+    private fun chronometerFromViews(n: Notification): Pair<Long, Boolean>? = runCatching {
+        val rv = n.bigContentView ?: n.contentView ?: return@runCatching null
+        val host = android.widget.FrameLayout(this)
+        val root = rv.apply(this, host) ?: return@runCatching null
+        val chrono = findChronometer(root) ?: return@runCatching null
+        chrono.base to chrono.isCountDown
+    }.getOrNull()
+
+    private fun findChronometer(v: android.view.View): android.widget.Chronometer? {
+        if (v is android.widget.Chronometer) return v
+        if (v is android.view.ViewGroup) {
+            for (i in 0 until v.childCount) findChronometer(v.getChildAt(i))?.let { return it }
+        }
+        return null
+    }
+
     private fun classifyLive(n: Notification, pkg: String, ongoing: Boolean): LiveKind {
         val chronometer = n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)
+        val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val blob = "$title $text".lowercase()
+
         // Only treat as a live activity when it's genuinely ongoing — a missed-call
         // or one-shot alert with CATEGORY_CALL should not stick as a live pill.
         when (n.category) {
             Notification.CATEGORY_CALL -> if (ongoing) return LiveKind.CALL
             Notification.CATEGORY_NAVIGATION -> if (ongoing) return LiveKind.NAVIGATION
             Notification.CATEGORY_ALARM -> if (ongoing || chronometer) return LiveKind.TIMER
+            Notification.CATEGORY_PROGRESS -> if (ongoing || chronometer) return LiveKind.ACTIVITY
         }
         // Package / text heuristics only for ongoing or chronometer cards — missed-call
         // toasts and one-shot alerts should not stick forever on the island.
         if (!ongoing && !chronometer) return LiveKind.NONE
 
         val p = pkg.lowercase()
-        if (CALL_PACKAGES.any { p.contains(it) }) return LiveKind.CALL
-        if (NAV_PACKAGES.any { p.contains(it) }) return LiveKind.NAVIGATION
-        if (TIMER_PACKAGES.any { p.contains(it) }) return LiveKind.TIMER
+        val cfg = IslandConfig.load(applicationContext)
+        if (cfg.callApps.any { p.contains(it.lowercase()) } || CALL_PACKAGES.any { p.contains(it) }) return LiveKind.CALL
+        if (cfg.navApps.any { p.contains(it.lowercase()) } || NAV_PACKAGES.any { p.contains(it) }) return LiveKind.NAVIGATION
+        if (cfg.timerApps.any { p.contains(it.lowercase()) } || TIMER_PACKAGES.any { p.contains(it) }) return LiveKind.TIMER
 
-        val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val blob = "$title $text"
+        // Recording / live-activity apps (voice recorder, screen recorder, fitness, …)
+        if (RECORDING_PACKAGES.any { p.contains(it) } || RECORDING_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (FITNESS_PACKAGES.any { p.contains(it) } || FITNESS_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (DELIVERY_PACKAGES.any { p.contains(it) } || DELIVERY_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (RIDE_PACKAGES.any { p.contains(it) } || RIDE_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (PAYMENT_PACKAGES.any { p.contains(it) } || PAYMENT_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (FILE_TRANSFER_PACKAGES.any { p.contains(it) } || FILE_TRANSFER_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (APP_INSTALL_PACKAGES.any { p.contains(it) } || APP_INSTALL_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+        if (WIFI_PACKAGES.any { p.contains(it) } || WIFI_RE.containsMatchIn(blob)) return LiveKind.ACTIVITY
+
         if (blob.contains(TIMER_RE)) return LiveKind.TIMER
         if (blob.contains(NAV_RE)) return LiveKind.NAVIGATION
         if (blob.contains(CALL_RE)) return LiveKind.CALL
@@ -243,6 +325,9 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private companion object {
+        /** Notification extras keys SystemUI uses for a running timer / stopwatch. */
+        const val EXTRA_CHRONOMETER_BASE = "android.chronometerBase"
+        const val EXTRA_CHRONOMETER_COUNT_DOWN = "android.chronometerCountDown"
         val WHITESPACE = Regex("\\s*\\n\\s*")
         const val HOTSPOT_TAG = "IslandHotspot"
         val HOTSPOT_TEXT_KEYS = arrayOf(
@@ -269,6 +354,68 @@ class IslandNotificationListener : NotificationListenerService() {
         val TIMER_PACKAGES = listOf(
             "deskclock", "clock", "timer", "stopwatch", "com.google.android.deskclock",
             "com.android.deskclock", "com.sec.android.app.clockpackage", "com.vivo.countdown",
+        )
+        val RECORDING_PACKAGES = listOf(
+            "recorder", "voice", "audiorecorder", "screenrecorder", "screen recorder",
+            "com.android.server.telecom", "callrecording",
+        )
+        val FITNESS_PACKAGES = listOf(
+            "fitness", "workout", "exercise", "steps", "health", "samsunghealth",
+            "com.google.android.apps.fitness", "com.xiaomi.wearable",
+        )
+        val DELIVERY_PACKAGES = listOf(
+            "delivery", "food", "zomato", "swiggy", "ubereats", "doordash",
+            "amazon", "flipkart", "meesho",
+        )
+        val RIDE_PACKAGES = listOf(
+            "uber", "ola", "lyft", "cab", "taxi", "ride", "didi", "grab",
+        )
+        val PAYMENT_PACKAGES = listOf(
+            "payment", "pay", "wallet", "upi", "phonepe", "gpay", "paytm",
+            "bhim", "amazonpay",
+        )
+        val FILE_TRANSFER_PACKAGES = listOf(
+            "files", "transfer", "shareit", "xender", "send anywhere",
+            "com.android.documentsui",
+        )
+        val APP_INSTALL_PACKAGES = listOf(
+            "package", "install", "update", "play store", "galaxy store",
+            "com.android.packageinstaller",
+        )
+        val WIFI_PACKAGES = listOf(
+            "wifi", "wlan", "com.android.settings", "com.android.systemui",
+        )
+        val RECORDING_RE = Regex(
+            "\\b(recording|record|voice memo|screen record|call record|dictaphone)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val FITNESS_RE = Regex(
+            "\\b(workout|fitness|exercise|steps|running|walking|cycling|activity)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val DELIVERY_RE = Regex(
+            "\\b(delivery|order|food|delivered|out for delivery|restaurant)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val RIDE_RE = Regex(
+            "\\b(ride|trip|driver|arriving|pickup|cab|taxi|uber|ola|lyft)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val PAYMENT_RE = Regex(
+            "\\b(payment|paid|transaction|wallet|upi|paid successfully|payment received)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val FILE_TRANSFER_RE = Regex(
+            "\\b(file transfer|file sent|file received|download complete|upload complete)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val APP_INSTALL_RE = Regex(
+            "\\b(app install|installation|installed|app update|download complete)\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        val WIFI_RE = Regex(
+            "\\b(wifi|wireless|network|connected to|hotspot|tether)\\b",
+            RegexOption.IGNORE_CASE,
         )
     }
 

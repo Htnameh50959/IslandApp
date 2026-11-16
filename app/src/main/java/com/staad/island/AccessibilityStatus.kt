@@ -22,9 +22,27 @@ object AccessibilityStatus {
     /** True when Island's AccessibilityService is turned on. */
     fun isAccessibilityEnabled(context: Context): Boolean {
         val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        return manager
-            .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { it.resolveInfo?.serviceInfo?.packageName == context.packageName }
+        val services = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val pkgName = context.packageName
+
+        // Primary: check via the standard framework API.
+        val found = services.any { info ->
+            info.resolveInfo?.serviceInfo?.packageName == pkgName
+        }
+        if (found) return true
+
+        // Fallback: some OEM skins (vivo / Xiaomi / OnePlus) report a stale
+        // framework list while Settings.Secure already reflects the change.
+        val enabled = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        )
+        if (enabled != null) {
+            val target = "$pkgName/${pkgName}.IslandService"
+            return enabled.split(":").map { it.trim() }.any { it == target }
+        }
+
+        return false
     }
 
     /** Open the system Accessibility settings so the user can turn Island on. */

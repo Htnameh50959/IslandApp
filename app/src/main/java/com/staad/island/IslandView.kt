@@ -3,6 +3,8 @@ package com.staad.island
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
@@ -13,7 +15,6 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -81,6 +82,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         /** User dragged the media progress bar: fraction 0..1 of the track. */
         fun onSeek(fraction: Float)
         /** Where the settled island is (window coordinates), or null when it shouldn't take touches. */
+        /** The small companion bubble was tapped: open that event's card. */
+        fun onSecondaryTap()
         fun onTouchArea(area: Rect?)
     }
 
@@ -132,6 +135,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     private var sheenShaderKey = 0
     private var rimShaderKey = 0
     private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -140,29 +144,173 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
     private val rimRect = RectF()
     private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    /** Own paint for the wash: sharing one with the sheen let the later gradient
+     *  overwrite the wash's cached shader, so a redraw drew the wash white and the
+     *  card fell back to black. */
+    private val washPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowRect = RectF()
 
-    /** Soft light behind the pill, blurred (Android 12+). */
+    /** Crisp companion bubble body drawn beside the pill (kept off glowView so the soft
+     *  halo passes behind it don't wash the bubble out). */
+    private val bubbleView = object : View(context) {
+        override fun onDraw(canvas: Canvas) {
+            layoutSecondaryBubble()
+            if (secondaryKind == SecondaryKind.NONE || secondaryRect.width() <= 0f) return
+            drawSecondaryBubbleBody(canvas)
+        }
+    }
+
+    // Secondary bubble (dual layout): small circle to the right of main pill for another active event.
+    enum class SecondaryKind { NONE, MEDIA, TIMER, CHARGING, HOTSPOT, CALL, NAV, STATUS }
+    private var secondaryKind = SecondaryKind.NONE
+    private var secondaryPlaying = false
+    private val secondaryRect = RectF()
+    private val secondaryIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
+    private val secondaryBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF3B30.toInt(); style = Paint.Style.FILL }
+    private val secondaryAccentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = green; style = Paint.Style.FILL }
+    private var secondaryPhase = 0f
+    private var secondaryAnim: ValueAnimator? = null
+    /** 0 → hidden, 1 → fully on screen. Drives the bubble's entry/exit animation. */
+    private var secondaryPresence = 0f
+    private var secondaryPresenceAnim: ValueAnimator? = null
+
+    /** Grow the bubble out of the pill on entry, shrink it back on exit. */
+    private fun animatePresence(target: Float, enter: Boolean) {
+        secondaryPresenceAnim?.cancel()
+        val anim = ValueAnimator.ofFloat(secondaryPresence, target).apply {
+            duration = if (enter) 300 else 170
+            interpolator = if (enter) OvershootInterpolator(1.8f) else AccelerateInterpolator(1.6f)
+            addUpdateListener {
+                secondaryPresence = it.animatedValue as Float
+                bubbleView.invalidate(); glowView.invalidate(); pillView.invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    secondaryPresence = target
+                    if (target == 0f) secondaryKind = SecondaryKind.NONE
+                    bubbleView.invalidate(); glowView.invalidate()
+                }
+            })
+        }
+        secondaryPresenceAnim = anim
+        anim.start()
+    }
+
+    fun setSecondaryBubble(kind: SecondaryKind, playing: Boolean = false) {
+        if (kind == SecondaryKind.NONE) {
+            // exit: keep the last kind on screen while the bubble shrinks away
+            if (secondaryKind != SecondaryKind.NONE) animatePresence(0f, enter = false)
+            secondaryPlaying = false
+            secondaryAnim?.cancel()
+            secondaryAnim = null
+            secondaryPhase = 0f
+            return
+        }
+        if (kind != secondaryKind) animatePresence(1f, enter = true)
+        secondaryKind = kind
+        secondaryPlaying = playing
+        val animate = kind == SecondaryKind.MEDIA
+        if (kind != SecondaryKind.NONE && animate) {
+            if (secondaryAnim == null) {
+                secondaryAnim = ValueAnimator.ofFloat(0f, (Math.PI * 2).toFloat()).apply {
+                    duration = 900
+                    repeatCount = ValueAnimator.INFINITE
+                    interpolator = LinearInterpolator()
+                    addUpdateListener { secondaryPhase = it.animatedValue as Float; pillView.invalidate(); glowView.invalidate(); bubbleView.invalidate() }
+                    start()
+                }
+            } else if (secondaryAnim?.isStarted != true) {
+                secondaryAnim?.start()
+            }
+        } else {
+            secondaryAnim?.cancel()
+            secondaryAnim = null
+            secondaryPhase = 0f
+        }
+        pillView.invalidate(); glowView.invalidate(); bubbleView.invalidate()
+    }
+
+    /**
+     * Soft light behind the pill. Built from concentric rounded rects rather than a
+     * RenderEffect blur: on several GPUs a blurred view inside a translucent overlay
+     * window renders as colour garbage while the island animates.
+     */
     private val glowView = object : View(context) {
         override fun onDraw(canvas: Canvas) {
-            // Depth: a soft shadow under the island (blurred by the view's RenderEffect).
-            if (Build.VERSION.SDK_INT >= 31 && rect.height() > 0f) {
-                val size = (rect.height() / max(1f, compactH().toFloat())).coerceIn(0f, 1f)
-                shadowPaint.alpha = (110 * size).roundToInt()
-                val drop = dp(5).toFloat()
-                glowRect.set(rect.left + dp(4), rect.top + drop, rect.right - dp(4), rect.bottom + drop)
-                val sr = min(cornerRadius(), glowRect.height() / 2f)
-                canvas.drawRoundRect(glowRect, sr, sr, shadowPaint)
-            }
             val a = glowStrength()
-            if (a <= 0.01f) return
             glowPaint.color = glowColor
-            glowPaint.alpha = (a * 150).roundToInt().coerceIn(0, 255)
-            val grow = dp(3).toFloat()
-            glowRect.set(rect.left - grow, rect.top - grow, rect.right + grow, rect.bottom + grow)
-            val r = min(cornerRadius() + grow, glowRect.height() / 2f)
-            canvas.drawRoundRect(glowRect, r, r, glowPaint)
+            layoutSecondaryBubble()
+            if (secondaryKind != SecondaryKind.NONE && secondaryRect.width() > 0f) {
+                // Soft halo only; the crisp body is drawn by bubbleView so it stays sharp.
+                drawSecondaryBubbleHalo(canvas, a)
+            }
+            if (a > 0.01f) drawSoftHalo(canvas, rect, glowColor, a)
         }
+    }
+
+    private val haloRect = RectF()
+
+    /** Airbrushed halo: faint concentric passes, so no GPU blur filter is needed. */
+    private fun drawSoftHalo(canvas: Canvas, base: RectF, color: Int, strength: Float) {
+        glowPaint.color = color
+        for (pass in 5 downTo 1) {
+            val grow = dp(1.8f).toFloat() * pass
+            haloRect.set(base.left - grow, base.top - grow, base.right + grow, base.bottom + grow)
+            val fall = 1f - (pass - 1) / 5f
+            glowPaint.alpha = (strength * 66f * fall * fall).roundToInt().coerceIn(0, 255)
+            if (glowPaint.alpha == 0) continue
+            val r = min(cornerRadius() + grow, haloRect.height() / 2f)
+            canvas.drawRoundRect(haloRect, r, r, glowPaint)
+        }
+    }
+
+    /** Crisp bubble body (black circle + icon/bars), drawn by bubbleView so it stays sharp. */
+    private fun drawSecondaryBubbleBody(canvas: Canvas) {
+        val p = secondaryPresence.coerceIn(0f, 1f)
+        if (p <= 0.02f) return
+        val layer = canvas.saveLayerAlpha(secondaryRect, (p * 255).toInt().coerceIn(0, 255))
+        val sr2 = secondaryRect.height() / 2f
+        canvas.drawRoundRect(secondaryRect, sr2, sr2, shadowPaint)
+        val cx = secondaryRect.centerX(); val cy = secondaryRect.centerY()
+        when (secondaryKind) {
+            SecondaryKind.MEDIA -> {
+                val barW = dp(2.2f).toFloat(); val gap = dp(2.2f).toFloat()
+                val baseH = dp(6f).toFloat(); val maxH = dp(13f).toFloat()
+                val bars = 4; val totalW = bars * barW + (bars - 1) * gap
+                var x = cx - totalW / 2f
+                for (i in 0 until bars) {
+                    val ph = secondaryPhase + i * 0.9f
+                    val anim = if (secondaryPlaying) (0.35f + 0.65f * (0.5f + 0.5f * sin(ph))) else 0.35f
+                    val h = baseH + (maxH - baseH) * anim
+                    val top = cy - h / 2f
+                    val paint = if (i == 2) secondaryBarPaint else secondaryIconPaint
+                    paint.alpha = if (i == 2) 230 else 210
+                    val rr = RectF(x, top, x + barW, top + h)
+                    canvas.drawRoundRect(rr, barW / 2f, barW / 2f, paint)
+                    x += barW + gap
+                }
+            }
+            SecondaryKind.TIMER -> { secondaryIconPaint.alpha = 230; val s = dp(6f).toFloat(); val p = android.graphics.Path(); p.moveTo(cx-s,cy-s);p.lineTo(cx+s,cy-s);p.lineTo(cx,cy);p.close(); canvas.drawPath(p,secondaryIconPaint); val p2=android.graphics.Path(); p2.moveTo(cx-s,cy+s);p2.lineTo(cx+s,cy+s);p2.lineTo(cx,cy);p2.close(); canvas.drawPath(p2,secondaryIconPaint) }
+            SecondaryKind.CHARGING -> { secondaryAccentPaint.color = green; secondaryAccentPaint.alpha=230; val s=dp(7f).toFloat(); val p=android.graphics.Path(); p.moveTo(cx+s*0.1f,cy-s);p.lineTo(cx-s*0.4f,cy+s*0.1f);p.lineTo(cx,cy+s*0.1f);p.lineTo(cx-s*0.1f,cy+s);p.lineTo(cx+s*0.4f,cy-s*0.1f);p.lineTo(cx,cy-s*0.1f);p.close(); canvas.drawPath(p,secondaryAccentPaint) }
+            SecondaryKind.HOTSPOT -> { secondaryAccentPaint.color=green; secondaryAccentPaint.alpha=230; canvas.drawCircle(cx, cy + dp(3f).toFloat(), dp(1.8f).toFloat(), secondaryAccentPaint); val sp=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=dp(1.6f).toFloat();color=green;alpha=220}; val d5=dp(5f).toFloat(); val d2=dp(2f).toFloat(); val d8=dp(8f).toFloat(); val d11=dp(11f).toFloat(); canvas.drawArc(RectF(cx-d5,cy-d2,cx+d5,cy+d8),200f,140f,false,sp); canvas.drawArc(RectF(cx-d8,cy-d5,cx+d8,cy+d11),200f,140f,false,sp) }
+            SecondaryKind.CALL -> { secondaryAccentPaint.color=green; secondaryAccentPaint.alpha=230; canvas.drawCircle(cx,cy,dp(5.5f).toFloat(),secondaryAccentPaint) }
+            SecondaryKind.NAV -> { secondaryIconPaint.alpha=230; val p=android.graphics.Path(); val d7=dp(7f).toFloat(); val d5n=dp(5f).toFloat(); val d6n=dp(6f).toFloat(); val d3n=dp(3f).toFloat(); p.moveTo(cx,cy-d7);p.lineTo(cx+d5n,cy+d6n);p.lineTo(cx,cy+d3n);p.lineTo(cx-d5n,cy+d6n);p.close(); canvas.drawPath(p,secondaryIconPaint) }
+            SecondaryKind.STATUS -> { secondaryIconPaint.alpha=230; canvas.drawCircle(cx,cy,dp(4.5f).toFloat(),secondaryIconPaint) }
+            SecondaryKind.NONE -> {}
+        }
+        canvas.restoreToCount(layer)
+    }
+
+    /** Soft coloured halo around the companion bubble, drawn by glowView (blurred). */
+    private fun drawSecondaryBubbleHalo(canvas: Canvas, a: Float) {
+        if (a <= 0.01f) return
+        val p = secondaryPresence.coerceIn(0f, 1f)
+        if (p <= 0.02f) return
+        val sr2 = secondaryRect.height() / 2f
+        val g2 = RectF(secondaryRect)
+        g2.inset(-dp(2).toFloat(), -dp(2).toFloat())
+        glowPaint.alpha = (a * 120 * p).roundToInt().coerceIn(0, 255)
+        canvas.drawRoundRect(g2, sr2 + dp(2), sr2 + dp(2), glowPaint)
     }
 
     /** The black pill. It clips the content to its rounded shape. */
@@ -175,6 +323,11 @@ class IslandView(context: Context) : FrameLayout(context) {
             // glass catching light. Compact pills stay near-black so they melt
             // into the camera.
             val big = ((rect.height() / max(1f, compactH().toFloat())) - 1.2f).coerceIn(0f, 1f)
+            // Solid base first: a few GPU drivers composite the gradient shader
+            // semi-transparently over a translucent overlay window, which made
+            // the open cards see-through.
+            bodyPaint.color = 0xFF08080A.toInt()
+            canvas.drawRoundRect(rect, r, r, bodyPaint)
             val topAlpha = (0xF4 - 0x10 * big).roundToInt()
             if (bodyShaderTop != rect.top || bodyShaderBottom != rect.bottom ||
                 bodyShaderAlpha != topAlpha
@@ -197,7 +350,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 val a = (0x5C * tall * tintLevel).roundToInt().coerceIn(0, 255)
                 val washKey = (tint * 31 + a) * 31 + (rect.height() * 100).toInt()
                 if (washShaderKey != washKey) {
-                    sheenPaint.shader = LinearGradient(
+                    washPaint.shader = LinearGradient(
                         0f, rect.top + rect.height() * 0.35f, 0f, rect.bottom,
                         Color.argb(0, Color.red(tint), Color.green(tint), Color.blue(tint)),
                         Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
@@ -205,7 +358,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                     )
                     washShaderKey = washKey
                 }
-                canvas.drawRoundRect(rect, r, r, sheenPaint)
+                canvas.drawRoundRect(rect, r, r, washPaint)
             }
             // Glass highlight along the top, and a hairline rim that is brighter
             // at the top edge (soft neumorphic depth). Only on the open cards.
@@ -234,6 +387,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 }
                 canvas.drawRoundRect(rimRect, max(r - sw, 0f), max(r - sw, 0f), rimPaint)
             }
+
         }
     }
 
@@ -281,6 +435,26 @@ class IslandView(context: Context) : FrameLayout(context) {
         stripHotspot = hotspot
         stripClients = clients
         stripCharge = charge
+    }
+
+    @Deprecated("Use setSecondaryBubble")
+    fun setSecondaryMediaBubble(show: Boolean, playing: Boolean = true) {
+        setSecondaryBubble(if (show) SecondaryKind.MEDIA else SecondaryKind.NONE, playing)
+    }
+
+    private fun layoutSecondaryBubble() {
+        if (secondaryKind == SecondaryKind.NONE || rect.height() <= 0f) {
+            secondaryRect.setEmpty(); return
+        }
+        val d = dp(32).toFloat()
+        val gap = dp(8).toFloat()
+        // Entry/exit: the bubble grows out from just behind the pill and tucks
+        // back in when it goes away, instead of popping in and out of existence.
+        val p = secondaryPresence.coerceIn(0f, 1.08f)
+        val dd = d * (0.55f + 0.45f * p)
+        val left = rect.right + gap * p - (1f - p) * dp(6).toFloat()
+        val cy = rect.centerY()
+        secondaryRect.set(left, cy - dd / 2f, left + dd, cy + dd / 2f)
     }
 
     /**
@@ -481,6 +655,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
     private val mediaTitle = label(16f, Color.WHITE, bold = true)
     private val mediaArtist = label(14f, grey)
+    private val mediaNextTrack = label(12f, 0xFF98989F.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val mediaBars = EqualizerView(context)
     private val mediaProgress = ProgressLine(context).apply {
         isClickable = true
@@ -503,6 +678,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 setPadding(dp(14), 0, dp(10), 0)
                 addView(mediaTitle)
                 addView(mediaArtist, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
+                addView(mediaNextTrack, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(2) })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             addView(mediaBars, LinearLayout.LayoutParams(dp(26), dp(22)))
         })
@@ -573,8 +749,10 @@ class IslandView(context: Context) : FrameLayout(context) {
     /** Colour for the wash at the bottom of a big card (null = plain black). */
     private fun setTint(color: Int?) {
         val c = color?.takeIf { it != Color.WHITE }
-        if (c != null) tintColor = c
-        val target = if (c != null) 1f else 0f
+        // A user-chosen accent overrides the auto-derived wash colour.
+        val effective = if (c != null && accentOverride != 0) accentOverride else c
+        if (effective != null) tintColor = effective
+        val target = if (effective != null) 1f else 0f
         if (tintLevel == target && tintAnim?.isRunning != true) return
         tintAnim?.cancel()
         tintAnim = ValueAnimator.ofFloat(tintLevel, target).apply {
@@ -590,6 +768,8 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     // ── Glow ────────────────────────────────────────────────────────────────
     private var glowColor = Color.WHITE
+    /** User-chosen accent override (0 = auto from album / app). Applied to glow + tint. */
+    var accentOverride: Int = 0
     private var glowLevel = 0f
     private var glowAnim: ValueAnimator? = null
     private var pulsePhase = 0f
@@ -606,9 +786,6 @@ class IslandView(context: Context) : FrameLayout(context) {
     init {
         clipChildren = false
         glowView.setWillNotDraw(false)
-        if (Build.VERSION.SDK_INT >= 31) {
-            glowView.setRenderEffect(RenderEffect.createBlurEffect(dp(14).toFloat(), dp(14).toFloat(), Shader.TileMode.DECAL))
-        }
         addView(glowView, LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         pillView.setWillNotDraw(false)
@@ -623,6 +800,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             }
         }
         addView(pillView, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        addView(bubbleView, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         for (l in layers) {
             l.alpha = 0f
             l.visibility = INVISIBLE
@@ -633,6 +811,13 @@ class IslandView(context: Context) : FrameLayout(context) {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
+                // companion bubble: open the event it stands for
+                if (secondaryKind != SecondaryKind.NONE && secondaryPresence > 0.5f &&
+                    secondaryRect.width() > 0f && secondaryRect.contains(e.x, e.y)
+                ) {
+                    callbacks?.onSecondaryTap()
+                    return true
+                }
                 // video pill: the right half (title + button) toggles play/pause
                 if (mode == Mode.COMPACT_MEDIA && videoPill && e.x > rect.centerX()) {
                     callbacks?.onPlayPause()
@@ -703,7 +888,12 @@ class IslandView(context: Context) : FrameLayout(context) {
     override fun onDetachedFromWindow() {
         Choreographer.getInstance().removeFrameCallback(frame)
         running = false
-        layerAnims.values.forEach { it.cancel() }
+        // Cancel a snapshot: an animator's end listener removes itself from the
+        // map, which would otherwise throw ConcurrentModificationException and
+        // take the whole service down with it.
+        val anims = layerAnims.values.toList()
+        layerAnims.clear()
+        anims.forEach { runCatching { it.cancel() } }
         glowAnim?.cancel()
         pulse.cancel()
         super.onDetachedFromWindow()
@@ -1072,7 +1262,9 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     // ── Internals ───────────────────────────────────────────────────────────
 
-    private fun idleVisible() = false
+    // The island only rests on screen when the user asks it to (Show idle);
+    // otherwise it hides until an event re-opens it.
+    private fun idleVisible() = cfg.showIdle
 
     // Base size comes from the detected camera; it is never user-configured.
     private fun compactH() = geometry.compactH.coerceAtLeast(dp(32))
@@ -1160,6 +1352,19 @@ class IslandView(context: Context) : FrameLayout(context) {
         mediaTitle.text = m.title.ifBlank { "Now playing" }
         mediaArtist.text = m.artist
         mediaArtist.visibility = if (m.artist.isBlank()) GONE else VISIBLE
+        // Next-track preview: show the upcoming track when the session exposes its queue.
+        val nextLine = buildString {
+            m.nextTrackTitle?.let {
+                append("Next: ")
+                append(it)
+                m.nextTrackArtist?.let {
+                    append(" · ")
+                    append(it)
+                }
+            }
+        }
+        mediaNextTrack.text = nextLine
+        mediaNextTrack.visibility = if (nextLine.isNotBlank()) VISIBLE else GONE
         mediaBars.color = m.accent
         mediaBars.playing = m.playing
         mediaProgress.color = m.accent
@@ -1263,14 +1468,29 @@ class IslandView(context: Context) : FrameLayout(context) {
         val h = sh.target
         val left = geometry.anchorX - w / 2f
         val top = topFor(h, compactH().toFloat()) + glowPad
-        return Rect(left.toInt(), top.toInt(), ceil(left + w).toInt(), ceil(top + h).toInt())
+        return withBubble(Rect(left.toInt(), top.toInt(), ceil(left + w).toInt(), ceil(top + h).toInt()))
+    }
+
+    /** The touch window must also cover the companion bubble, or taps on it miss. */
+    private fun withBubble(base: Rect): Rect {
+        if (secondaryKind == SecondaryKind.NONE || secondaryPresence < 0.5f) return base
+        layoutSecondaryBubble()
+        if (secondaryRect.width() <= 0f) return base
+        val out = Rect(base)
+        out.union(
+            secondaryRect.left.toInt() - dp(2),
+            secondaryRect.top.toInt() - dp(2),
+            ceil(secondaryRect.right).toInt() + dp(2),
+            ceil(secondaryRect.bottom).toInt() + dp(2),
+        )
+        return out
     }
 
     private fun onSettled() {
         if (!shown) alpha = 0f
-        val area = if (idleHidden || !shown) null else Rect(
+        val area = if (idleHidden || !shown) null else withBubble(Rect(
             rect.left.toInt(), rect.top.toInt(), ceil(rect.right).toInt(), ceil(rect.bottom).toInt(),
-        )
+        ))
         callbacks?.onTouchArea(area)
     }
 
@@ -1318,14 +1538,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         l.alpha = a * readable
         l.translationX = rect.centerX() - lp.width / 2f
         l.translationY = rect.centerY() - lp.height / 2f
-        if (Build.VERSION.SDK_INT >= 31) {
-            val amount = max(1f - a, (1f - fit) * 1.6f).coerceIn(0f, 1f)
-            val b = (amount * dp(14)).let { if (it < 0.5f) 0f else it }
-            if (abs(b - (blurLevel[l] ?: 0f)) > 0.4f || (b == 0f && blurLevel[l] != 0f)) {
-                blurLevel[l] = b
-                l.setRenderEffect(if (b == 0f) null else RenderEffect.createBlurEffect(b, b, Shader.TileMode.DECAL))
-            }
-        }
+        // No RenderEffect blur on the cross-fading content: on some GPUs a blurred
+        // view inside a translucent overlay renders as colour garbage mid-animation.
     }
 
     // ── Glow ────────────────────────────────────────────────────────────────
@@ -1337,8 +1551,11 @@ class IslandView(context: Context) : FrameLayout(context) {
             pulse.cancel()
             return
         }
-        if (color != null) glowColor = color
-        fadeGlowTo(if (color != null) 1f else 0f)
+        val c = color?.takeIf { it != Color.WHITE }
+        // A user-chosen accent overrides the auto-derived colour (album art, app…).
+        val effective = if (c != null && accentOverride != 0) accentOverride else c
+        if (effective != null) glowColor = effective
+        fadeGlowTo(if (effective != null) 1f else 0f)
         if (pulsing && color != null) {
             if (!pulse.isStarted) pulse.start()
         } else {

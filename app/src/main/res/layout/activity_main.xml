@@ -116,6 +116,33 @@
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
             <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnCallApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_phone" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Call apps" />
+                    <TextView android:id="@+id/callAppsInfo" style="@style/RowSub" android:text="Using built-in call apps" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnNavApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_nav" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Navigation apps" />
+                    <TextView android:id="@+id/navAppsInfo" style="@style/RowSub" android:text="Using built-in navigation apps" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnTimerApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Timer apps" />
+                    <TextView android:id="@+id/timerAppsInfo" style="@style/RowSub" android:text="Using built-in timer apps" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
@@ -302,7 +329,37 @@
                 <TextView android:id="@+id/valGlow" style="@style/RowValue" />
             </LinearLayout>
             <SeekBar android:id="@+id/seekGlow" style="@style/Seek" />
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnAccentColor" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_pill" android:backgroundTint="@color/accent" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Accent color" />
+                    <TextView android:id="@+id/accentInfo" style="@style/RowSub" android:text="Auto" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
         </LinearLayout>
+        <TextView style="@style/Section" android:text="System" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Volume pill" />
+                    <TextView style="@style/RowSub" android:text="Show level when volume changes" />
+                </LinearLayout>
+                <Switch android:id="@+id/swVolumePill" style="@style/RowSwitch" android:contentDescription="Volume pill" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Brightness pill" />
+                    <TextView style="@style/RowSub" android:text="Show level when brightness changes" />
+                </LinearLayout>
+                <Switch android:id="@+id/swBrightnessPill" style="@style/RowSwitch" android:contentDescription="Brightness pill" />
+            </LinearLayout>
+        </LinearLayout>
+
         <TextView style="@style/Section" android:text="Try it" />
         <LinearLayout style="@style/Card">
             <LinearLayout android:id="@+id/btnFaceId" style="@style/Row.Tappable">

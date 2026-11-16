@@ -26,6 +26,10 @@ object Prefs {
     const val HIDDEN_APPS = "hidden_apps"
     /** Extra packages the user treats as video apps (on top of the built-in list). */
     const val VIDEO_APPS = "video_apps"
+    /** Extra packages treated as calls/navigation/timers on top of built-in detection. */
+    const val CALL_APPS = "call_apps"
+    const val NAV_APPS = "nav_apps"
+    const val TIMER_APPS = "timer_apps"
     /** Island look: 50–150 % corner rounding and 0–100 % glow. */
     const val CORNER_SCALE = "corner_scale"
     const val GLOW_STRENGTH = "glow_strength"
@@ -38,6 +42,13 @@ object Prefs {
     const val CANNED_REPLIES = "canned_replies"
     /** Stored clipboard history; only written when the user opts in. */
     const val CLIP_ITEMS = "clip_items"
+    /** Volume/brightness pills. */
+    const val VOLUME_PILL = "volume_pill"
+    const val BRIGHTNESS_PILL = "brightness_pill"
+    /** Accent color override (0 = auto from album/app). */
+    const val ACCENT_COLOR = "accent_color"
+    /** Height scale percent for island size. */
+    const val HEIGHT_SCALE = "height_scale"
 
     fun get(ctx: Context): SharedPreferences = ctx.getSharedPreferences("island", Context.MODE_PRIVATE)
 }
@@ -74,12 +85,19 @@ data class IslandConfig(
     /** Never draw the island over these packages (games, banking, camera…). */
     val hiddenApps: Set<String> = emptySet(),
     val videoApps: Set<String> = emptySet(),
+    val callApps: Set<String> = emptySet(),
+    val navApps: Set<String> = emptySet(),
+    val timerApps: Set<String> = emptySet(),
     val cornerPercent: Int = 100,
     val glowPercent: Int = 100,
     val hideImmersive: Boolean = false,
     val clipHistory: Boolean = false,
     val quickReplies: Boolean = false,
     val cannedReplies: Set<String> = DEFAULT_REPLIES,
+    val volumePill: Boolean = true,
+    val brightnessPill: Boolean = true,
+    val accentColor: Int = 0,
+    val heightPercent: Int = 100,
 ) {
     companion object {
         val DEFAULT_REPLIES: Set<String> = setOf("On my way", "Can't talk now", "OK")
@@ -110,6 +128,9 @@ data class IslandConfig(
                     ?: d.hiddenApps,
                 videoApps = p.getStringSet(Prefs.VIDEO_APPS, d.videoApps)?.toSet()
                     ?: d.videoApps,
+                callApps = p.getStringSet(Prefs.CALL_APPS, d.callApps)?.toSet() ?: d.callApps,
+                navApps = p.getStringSet(Prefs.NAV_APPS, d.navApps)?.toSet() ?: d.navApps,
+                timerApps = p.getStringSet(Prefs.TIMER_APPS, d.timerApps)?.toSet() ?: d.timerApps,
                 cornerPercent = p.getInt(Prefs.CORNER_SCALE, d.cornerPercent).coerceIn(50, 150),
                 glowPercent = p.getInt(Prefs.GLOW_STRENGTH, d.glowPercent).coerceIn(0, 100),
                 hideImmersive = p.getBoolean(Prefs.HIDE_IMMERSIVE, d.hideImmersive),
@@ -117,6 +138,10 @@ data class IslandConfig(
                 quickReplies = p.getBoolean(Prefs.QUICK_REPLIES, d.quickReplies),
                 cannedReplies = p.getStringSet(Prefs.CANNED_REPLIES, d.cannedReplies)?.toSet()
                     ?: d.cannedReplies,
+                volumePill = p.getBoolean(Prefs.VOLUME_PILL, d.volumePill),
+                brightnessPill = p.getBoolean(Prefs.BRIGHTNESS_PILL, d.brightnessPill),
+                accentColor = p.getInt(Prefs.ACCENT_COLOR, d.accentColor),
+                heightPercent = p.getInt(Prefs.HEIGHT_SCALE, d.heightPercent).coerceIn(70, 150),
             )
         }
     }
