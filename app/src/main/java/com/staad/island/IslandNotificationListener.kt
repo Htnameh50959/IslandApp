@@ -26,6 +26,8 @@ class IslandNotificationListener : NotificationListenerService() {
 
     private var sessionManager: MediaSessionManager? = null
     private var controller: MediaController? = null
+    private var sessions: List<MediaController> = emptyList()
+    private var sessionIndex = 0
     private var lastArt: Bitmap? = null
     private var lastAccent = Color.WHITE
     private val lastContent = HashMap<String, String>()
@@ -48,19 +50,8 @@ class IslandNotificationListener : NotificationListenerService() {
             if (key == Prefs.VIDEO) refreshSessions(null)
         }
 
-    // vivo's cleaner turns the island's Accessibility service off now and then: put it back.
-    private val guardHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val guard = object : Runnable {
-        override fun run() {
-            A11yGuard.repair(this@IslandNotificationListener)
-            guardHandler.postDelayed(this, 30_000)
-        }
-    }
-
     override fun onListenerConnected() {
         IslandBus.notificationsConnected = true
-        guardHandler.removeCallbacks(guard)
-        guardHandler.post(guard)
         // Earlier versions posted panel copies and test notifications: drop their channels.
         getSystemService(NotificationManager::class.java)?.let { nm ->
             runCatching { nm.deleteNotificationChannel("shade_copies") }
@@ -70,6 +61,7 @@ class IslandNotificationListener : NotificationListenerService() {
         runCatching { activeNotifications }.getOrNull().orEmpty().forEach { checkHotspot(it) }
         sessionManager = getSystemService(MediaSessionManager::class.java)
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        IslandBus.mediaSwitcher = { cycleSession() }
         try {
             sessionManager?.addOnActiveSessionsChangedListener(sessionsListener, component)
             refreshSessions(null)
@@ -79,10 +71,10 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         IslandBus.notificationsConnected = false
-        guardHandler.removeCallbacks(guard)
         // Some phones (vivo, Xiaomi…) unbind the listener in the background, and
         // then notifications silently stop reaching the island. Ask to come back.
         Prefs.get(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
+        IslandBus.mediaSwitcher = null
         runCatching { requestRebind(component) }
         runCatching { sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(mediaCallback)
@@ -100,14 +92,31 @@ class IslandNotificationListener : NotificationListenerService() {
         // Sound only (Videos switch off): skip video apps so music playing
         // behind YouTube etc. is still picked.
         val sessions = if (IslandConfig.load(this).videoPill) all
-            else all.filter { it.packageName !in VIDEO_PACKAGES }
+            else all.filter { it.packageName !in VIDEO_PACKAGES && it.packageName !in IslandBus.videoApps }
+        this.sessions = sessions
         val best = sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
             ?: sessions.firstOrNull()
         if (best?.sessionToken != controller?.sessionToken) {
             controller?.unregisterCallback(mediaCallback)
             controller = best
+            sessionIndex = sessions.indexOfFirst { it.sessionToken == best?.sessionToken }
+                .coerceAtLeast(0)
             best?.registerCallback(mediaCallback, mainHandler)
         }
+        publishMedia()
+    }
+
+    /**
+     * Two sessions at once (music + a podcast, or music behind a video): move to
+     * the next active one. Long-press on the open player calls this.
+     */
+    private fun cycleSession() {
+        if (sessions.size < 2) return
+        sessionIndex = (sessionIndex + 1) % sessions.size
+        controller?.unregisterCallback(mediaCallback)
+        controller = sessions[sessionIndex]
+        controller?.registerCallback(mediaCallback, mainHandler)
+        lastArt = null
         publishMedia()
     }
 
@@ -164,10 +173,16 @@ class IslandNotificationListener : NotificationListenerService() {
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return // music is shown by the player
 
         // Only calls, navigation and timers reach the island; other notifications stay
-        // in the system shade.
-        val kind = classifyLive(n, sbn.packageName, sbn.isOngoing)
-        if (kind == LiveKind.NONE) return
-        if (!Prefs.get(this).getBoolean(Prefs.LIVE_ACTIVITIES, true)) return
+        // in the system shade — unless canned replies are on and this is a
+        // repliable chat message, which is exactly what that opt-in is for.
+        val prefs = Prefs.get(this)
+        val reply = replyOf(n)
+        var kind = classifyLive(n, sbn.packageName, sbn.isOngoing)
+        if (kind == LiveKind.NONE) {
+            if (reply == null || !prefs.getBoolean(Prefs.QUICK_REPLIES, false)) return
+            kind = LiveKind.ACTIVITY
+        }
+        if (!prefs.getBoolean(Prefs.LIVE_ACTIVITIES, true)) return
 
         val appName = appLabel(sbn.packageName)
         val (rawTitle, text) = titleAndText(n)
@@ -192,6 +207,8 @@ class IslandNotificationListener : NotificationListenerService() {
                 appIcon = appIcon(sbn.packageName),
                 appName = appName,
                 actions = actionsOf(n),
+                replyIntent = reply?.first,
+                replyInput = reply?.second,
                 accent = appAccent(sbn.packageName),
             )
         )
@@ -335,6 +352,16 @@ class IslandNotificationListener : NotificationListenerService() {
             }
         }
         return title to text.replace(WHITESPACE, " ")
+    }
+
+    /** The first reply action (canned replies use it without opening a keyboard). */
+    private fun replyOf(n: Notification): Pair<android.app.PendingIntent, android.app.RemoteInput>? {
+        for (a in n.actions.orEmpty()) {
+            val input = a.remoteInputs?.firstOrNull() ?: continue
+            val intent = a.actionIntent ?: continue
+            return intent to input
+        }
+        return null
     }
 
     /** The notification's own buttons, except reply fields (those need typing, so open the app). */

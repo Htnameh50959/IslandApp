@@ -11,7 +11,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingStart="16dp"
-        android:paddingTop="72dp"
+        android:paddingTop="24dp"
         android:paddingEnd="16dp"
         android:paddingBottom="40dp">
 
@@ -102,6 +102,15 @@
                 <Switch android:id="@+id/swVideo" style="@style/RowSwitch" android:contentDescription="Videos" />
             </LinearLayout>
             <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnVideoApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_music" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Video apps" />
+                    <TextView android:id="@+id/videoInfo" style="@style/RowSub" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
@@ -180,6 +189,42 @@
                 </LinearLayout>
                 <Switch android:id="@+id/swDrop" style="@style/RowSwitch" android:contentDescription="Drag &amp; Go" />
             </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_copy" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Clipboard history" />
+                    <TextView style="@style/RowSub" android:text="Last 20 copies, on this phone only" />
+                </LinearLayout>
+                <Switch android:id="@+id/swClipHistory" style="@style/RowSwitch" android:contentDescription="Clipboard history" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnClipHistory" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_search" android:backgroundTint="@color/t_teal" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Open clipboard history" />
+                    <TextView android:id="@+id/clipInfo" style="@style/RowSub" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_message" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Quick replies" />
+                    <TextView style="@style/RowSub" android:text="Canned chips on chat notifications" />
+                </LinearLayout>
+                <Switch android:id="@+id/swQuickReplies" style="@style/RowSwitch" android:contentDescription="Quick replies" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnCannedReplies" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_share" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Edit canned replies" />
+                    <TextView android:id="@+id/cannedInfo" style="@style/RowSub" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
         </LinearLayout>
         <TextView style="@style/Section" android:text="Look" />
         <LinearLayout style="@style/Card">
@@ -216,6 +261,42 @@
                 </LinearLayout>
                 <Switch android:id="@+id/swLandscape" style="@style/RowSwitch" android:contentDescription="Hide in landscape" />
             </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_moon" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Hide over fullscreen apps" />
+                    <TextView style="@style/RowSub" android:text="Games and immersive video" />
+                </LinearLayout>
+                <Switch android:id="@+id/swImmersive" style="@style/RowSwitch" android:contentDescription="Hide over fullscreen apps" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnHiddenApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell_off" android:backgroundTint="@color/t_dark" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Hidden apps" />
+                    <TextView android:id="@+id/hiddenInfo" style="@style/RowSub" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Shape &amp; glow" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Corner roundness" />
+                </LinearLayout>
+                <TextView android:id="@+id/valCorner" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekCorner" style="@style/Seek" />
+            <View style="@style/Divider" />
+            <LinearLayout style="@style/Row">
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Glow strength" />
+                </LinearLayout>
+                <TextView android:id="@+id/valGlow" style="@style/RowValue" />
+            </LinearLayout>
+            <SeekBar android:id="@+id/seekGlow" style="@style/Seek" />
         </LinearLayout>
         <TextView style="@style/Section" android:text="Try it" />
         <LinearLayout style="@style/Card">
@@ -224,6 +305,30 @@
                 <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                     android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
                     android:textColor="@color/text" android:text="Preview unlock" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnPreview" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_pill" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Preview every pill" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnExport" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_share" android:backgroundTint="@color/t_teal" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Export settings" />
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnImport" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_drop" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
+                    android:textColor="@color/text" android:text="Import settings" />
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
         </LinearLayout>

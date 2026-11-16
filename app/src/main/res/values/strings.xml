@@ -3,4 +3,8 @@
     <string name="tagline">Lives around your camera.</string>
     <string name="a11y_description">Island uses this permission to draw the floating island at the top of the screen and, if Copy suggestions is on, to notice when you copy text so it can offer to open a link, call a number or write an email. Copied text stays on your phone: it is never stored or sent anywhere.</string>
     <string name="restricted_hint">If Android won\'t let you turn Island on: Settings › Apps › Island › ⋮ › Allow restricted settings, then try again.</string>
+    <string name="a11y_notif_title">Island needs Accessibility</string>
+    <string name="a11y_notif_text">Turn on the Island service in Accessibility settings so the island can appear at the top of the screen.</string>
+    <string name="a11y_enable">Enable Accessibility</string>
+    <string name="a11y_open">Open Accessibility</string>
 </resources>

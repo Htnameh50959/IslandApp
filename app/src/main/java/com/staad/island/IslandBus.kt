@@ -28,6 +28,9 @@ data class NotifEvent(
     val appIcon: Drawable? = null,
     val appName: String = "",
     val actions: List<NotifAction> = emptyList(),
+    /** Reply action of a chat notification, when the app allows replying. */
+    val replyIntent: android.app.PendingIntent? = null,
+    val replyInput: android.app.RemoteInput? = null,
     /** The app icon's main colour, for the glow. */
     val accent: Int = 0xFFFFFFFF.toInt(),
 )
@@ -46,14 +49,32 @@ data class MediaState(
     val packageName: String = "",
 ) {
     /** True for video apps (YouTube, Netflix, ...): shown as a title + play/pause pill. */
-    val isVideo: Boolean get() = packageName in VIDEO_PACKAGES
+    val isVideo: Boolean get() = packageName in VIDEO_PACKAGES || packageName in IslandBus.videoApps
 
-    fun currentPosition(): Long {
-        if (positionMs < 0) return 0
-        if (!playing) return positionMs
-        val p = positionMs + ((SystemClock.elapsedRealtime() - positionUpdatedAt) * speed).toLong()
-        return if (durationMs > 0) p.coerceIn(0, durationMs) else p
-    }
+    fun currentPosition(): Long = positionAt(
+        positionMs = positionMs,
+        playing = playing,
+        elapsedSinceUpdateMs = SystemClock.elapsedRealtime() - positionUpdatedAt,
+        speed = speed,
+        durationMs = durationMs,
+    )
+}
+
+/**
+ * Pure position maths, split out of [MediaState.currentPosition] so it can be
+ * unit-tested without an Android runtime.
+ */
+internal fun positionAt(
+    positionMs: Long,
+    playing: Boolean,
+    elapsedSinceUpdateMs: Long,
+    speed: Float,
+    durationMs: Long,
+): Long {
+    if (positionMs < 0) return 0
+    if (!playing) return positionMs
+    val p = positionMs + (elapsedSinceUpdateMs * speed).toLong()
+    return if (durationMs > 0) p.coerceIn(0, durationMs) else p
 }
 
 /**
@@ -68,6 +89,8 @@ object IslandBus {
         fun onMedia(state: MediaState?)
         fun onFaceIdPreview()
         fun onPrefsChanged()
+        /** Show a fake pill so every mode can be checked on-device. */
+        fun onPreview(mode: String)
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -87,6 +110,16 @@ object IslandBus {
 
     val isOverlayRunning: Boolean get() = listener != null
 
+    /** User-added video packages, refreshed from settings by the overlay service. */
+    @Volatile var videoApps: Set<String> = emptySet()
+
+    /** Set by the notification listener: move to the next active media session. */
+    @Volatile var mediaSwitcher: (() -> Unit)? = null
+
+    fun switchMediaSource() {
+        main.post { mediaSwitcher?.invoke() }
+    }
+
     fun postNotification(e: NotifEvent) {
         main.post { listener?.onNotification(e) }
     }
@@ -97,6 +130,10 @@ object IslandBus {
 
     fun reloadPrefs() {
         main.post { listener?.onPrefsChanged() }
+    }
+
+    fun postPreview(mode: String) {
+        main.post { listener?.onPreview(mode) }
     }
 
     fun postRemoved(key: String) {

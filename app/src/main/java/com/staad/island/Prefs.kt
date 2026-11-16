@@ -22,6 +22,22 @@ object Prefs {
     const val LIVE_ACTIVITIES = "live_activities"
     /** Hotspot on / connected-devices pill. */
     const val HOTSPOT = "hotspot_devices"
+    /** Packages where the island stays completely out of the way. */
+    const val HIDDEN_APPS = "hidden_apps"
+    /** Extra packages the user treats as video apps (on top of the built-in list). */
+    const val VIDEO_APPS = "video_apps"
+    /** Island look: 50–150 % corner rounding and 0–100 % glow. */
+    const val CORNER_SCALE = "corner_scale"
+    const val GLOW_STRENGTH = "glow_strength"
+    /** Fold the island away over games and other fullscreen apps. */
+    const val HIDE_IMMERSIVE = "hide_immersive"
+    /** Opt-in, on-device clipboard history (last 20 items). */
+    const val CLIP_HISTORY = "clip_history"
+    /** Opt-in canned replies to chat notifications. */
+    const val QUICK_REPLIES = "quick_replies"
+    const val CANNED_REPLIES = "canned_replies"
+    /** Stored clipboard history; only written when the user opts in. */
+    const val CLIP_ITEMS = "clip_items"
 
     fun get(ctx: Context): SharedPreferences = ctx.getSharedPreferences("island", Context.MODE_PRIVATE)
 }
@@ -39,7 +55,10 @@ data class IslandConfig(
     /** Soft coloured light around the island (album art colour, green when charging…). */
     val glow: Boolean = true,
     /** Copy a link / number / email and the island offers to open it. */
-    val copySuggestions: Boolean = true,
+    // Off by default: the clipboard path briefly takes window focus, so Android
+    // shows its "Island pasted from your clipboard" notice every time. Surprise
+    // system UI on the first copy is not a good first impression.
+    val copySuggestions: Boolean = false,
     /** Earbuds connected, silent / vibrate, Do Not Disturb. */
     val statusPopups: Boolean = true,
     /** Drag text or a link to the top of the screen to share it. */
@@ -52,9 +71,20 @@ data class IslandConfig(
     val liveActivities: Boolean = true,
     /** Show personal hotspot on / connected device count. */
     val hotspotDevices: Boolean = true,
+    /** Never draw the island over these packages (games, banking, camera…). */
+    val hiddenApps: Set<String> = emptySet(),
+    val videoApps: Set<String> = emptySet(),
+    val cornerPercent: Int = 100,
+    val glowPercent: Int = 100,
+    val hideImmersive: Boolean = false,
+    val clipHistory: Boolean = false,
+    val quickReplies: Boolean = false,
+    val cannedReplies: Set<String> = DEFAULT_REPLIES,
 ) {
     companion object {
-        val DEFAULT = IslandConfig()
+        val DEFAULT_REPLIES: Set<String> = setOf("On my way", "Can't talk now", "OK")
+
+        val DEFAULT = IslandConfig(cannedReplies = DEFAULT_REPLIES)
 
         fun load(ctx: Context): IslandConfig {
             val p = Prefs.get(ctx)
@@ -76,6 +106,17 @@ data class IslandConfig(
                 videoPill = p.getBoolean(Prefs.VIDEO, d.videoPill),
                 liveActivities = p.getBoolean(Prefs.LIVE_ACTIVITIES, d.liveActivities),
                 hotspotDevices = p.getBoolean(Prefs.HOTSPOT, d.hotspotDevices),
+                hiddenApps = p.getStringSet(Prefs.HIDDEN_APPS, d.hiddenApps)?.toSet()
+                    ?: d.hiddenApps,
+                videoApps = p.getStringSet(Prefs.VIDEO_APPS, d.videoApps)?.toSet()
+                    ?: d.videoApps,
+                cornerPercent = p.getInt(Prefs.CORNER_SCALE, d.cornerPercent).coerceIn(50, 150),
+                glowPercent = p.getInt(Prefs.GLOW_STRENGTH, d.glowPercent).coerceIn(0, 100),
+                hideImmersive = p.getBoolean(Prefs.HIDE_IMMERSIVE, d.hideImmersive),
+                clipHistory = p.getBoolean(Prefs.CLIP_HISTORY, d.clipHistory),
+                quickReplies = p.getBoolean(Prefs.QUICK_REPLIES, d.quickReplies),
+                cannedReplies = p.getStringSet(Prefs.CANNED_REPLIES, d.cannedReplies)?.toSet()
+                    ?: d.cannedReplies,
             )
         }
     }

@@ -31,6 +31,7 @@ import android.view.Display
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
@@ -478,13 +479,29 @@ class IslandService : AccessibilityService(),
         }
     }
 
+    /**
+     * True when the active window fills the screen (a game, a fullscreen
+     * video). Uses the accessibility window bounds, so it needs no extra
+     * permission and does not guess from the package name.
+     */
+    private fun isImmersive(): Boolean = runCatching {
+        val win = windows.firstOrNull { it.isActive } ?: return@runCatching false
+        val b = Rect()
+        win.getBoundsInScreen(b)
+        val dm = resources.displayMetrics
+        b.top <= 0 && b.left <= 0 && b.width() >= dm.widthPixels - 2 && b.height() >= dm.heightPixels - 2
+    }.getOrDefault(false)
+
     private fun trackForeground(e: AccessibilityEvent) {
         if (e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = e.packageName?.toString() ?: return
         if (pkg == "com.android.systemui" || pkg == packageName || "inputmethod" in pkg || "keyboard" in pkg) return
         if (pkg == foregroundPkg) return
+        val wasHidden = foregroundPkg in cfg.hiddenApps
         foregroundPkg = pkg
-        if (media?.isVideo == true) render()
+        // A hidden app becoming visible (or vice versa) must redraw even when no
+        // media is playing, otherwise the island stays hidden or stays out.
+        if (wasHidden != (pkg in cfg.hiddenApps) || cfg.hideImmersive || media?.isVideo == true) render()
     }
 
     // TEMP: what the phone reports around copying (labels and lengths only, never the text)
@@ -591,6 +608,7 @@ class IslandService : AccessibilityService(),
         if (stamp > 0) lastClipStamp = stamp
         lastCopied = text
         lastCopiedAt = now
+        rememberCopy(text)
         shareClipboardWithComputer(text)
         val c = suggestions.forCopied(text) ?: return
         showCard(c)
@@ -783,6 +801,7 @@ class IslandService : AccessibilityService(),
     private fun reloadFromPrefs() {
         handler.post {
             cfg = IslandConfig.load(this)
+            IslandBus.videoApps = cfg.videoApps
             island?.cfg = cfg
             applyPosition()
             render()
@@ -866,10 +885,66 @@ class IslandService : AccessibilityService(),
         render()
     }
 
+    // ── Preview every pill (settings → Try it) ──────────────────────────────
+
+    private var previewMode: String? = null
+    private var previewUntil = 0L
+
+    override fun onPreview(mode: String) {
+        previewMode = mode
+        previewUntil = SystemClock.uptimeMillis() + PREVIEW_MS
+        render()
+        handler.postDelayed(previewDone, PREVIEW_MS + 100)
+    }
+
+    private val previewDone = object : Runnable {
+        override fun run() {
+            if (SystemClock.uptimeMillis() < previewUntil) return
+            previewMode = null
+            render()
+        }
+    }
+
+    private fun renderPreview(v: IslandView, mode: String) {
+        when (mode) {
+            "idle" -> v.showIdle()
+            "charging" -> v.showCharging(72, true)
+            "status" -> v.showStatus(R.drawable.ic_bluetooth, BLUE, "Earbuds", "Connected", BLUE)
+            "live" -> v.showLiveActivity(LiveKind.TIMER, "Timer", "24:59")
+            "actions" -> v.showActions(
+                R.drawable.ic_copy, GREY, "Copy & Go", "example.com/article", emptyList(),
+            )
+            "drop" -> v.showDropTarget(false)
+            "face" -> v.showFaceId(true)
+            "media" -> v.showCompactMedia(previewMedia())
+            "video" -> v.showCompactVideo(previewMedia())
+            else -> v.showIdle()
+        }
+    }
+
+    private fun previewMedia() = MediaState(
+        title = "Preview track",
+        artist = "Island",
+        art = null,
+        accent = 0xFFFF9F0A.toInt(),
+        playing = true,
+        durationMs = 180_000,
+        positionMs = 42_000,
+        positionUpdatedAt = SystemClock.elapsedRealtime(),
+        speed = 1f,
+        controller = null,
+    )
+
     // ── Rendering ───────────────────────────────────────────────────────────
 
     private fun render() {
         val v = island ?: return
+        val preview = previewMode
+        if (preview != null && SystemClock.uptimeMillis() < previewUntil) {
+            renderPreview(v, preview)
+            updateVisibility()
+            return
+        }
         if (DEBUG_COPY) android.util.Log.i(
             "IslandCopy",
             "render drop=$dropActive card=${card != null} live=${notif != null} status=${status != null} " +
@@ -883,6 +958,15 @@ class IslandService : AccessibilityService(),
         val st = status
         val p = hotspot
         val hotspotOn = cfg.hotspotDevices && p?.hotspotOn == true
+        val focus = swipeFocus?.takeIf { SystemClock.uptimeMillis() < swipeFocusUntil }
+        if (focus != null) {
+            v.setStrip(false, 0, c)
+            if (renderFocus(v, focus, m, n, c, st, hotspotOn)) {
+                updateVisibility()
+                return
+            }
+            swipeFocus = null
+        }
         v.setStrip(hotspotOn, p?.hotspotClients ?: 0, c)
         when {
             dropActive -> v.showDropTarget(dropHover)
@@ -890,11 +974,15 @@ class IslandService : AccessibilityService(),
             n != null && liveExpanded ->
                 v.showNotification(n, expanded = true, actions = notificationActions(n, notifControls), controls = notifControls)
             st != null && statusExpanded -> v.showActions(st.icon, st.tint, st.title, st.value, emptyList())
+            // A ringing call opens straight into its card so Answer / Decline
+            // are one tap away instead of hiding behind a long-press.
+            n != null && n.liveKind == LiveKind.CALL ->
+                v.showNotification(n, expanded = true, actions = notificationActions(n, true), controls = true)
             n != null -> v.showLiveActivity(n.liveKind, n.title, n.text)
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked", st.icon)
             hotspotOn -> v.showHotspot(p?.hotspotClients ?: 0)
             st != null -> v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
-            c != null -> v.showCharging(c.first, c.second)
+            c != null -> if (chargeExpanded) showBatteryCard(v, c.first, c.second) else v.showCharging(c.first, c.second)
             mediaExpanded && m != null -> v.showMedia(m)
             m != null && m.isVideo ->
                 if (m.packageName != foregroundPkg) v.showCompactVideo(m) else v.showIdle()
@@ -906,11 +994,71 @@ class IslandService : AccessibilityService(),
         updateVisibility()
     }
 
+    private var chargeExpanded = false
+
+    /** Charging pill, expanded: current draw, temperature and time-to-full. */
+    /** Send a canned RemoteInput reply through the notification's own action. */
+    private fun sendReply(n: NotifEvent, text: String) {
+        val input = n.replyInput ?: return
+        val intent = Intent()
+        val results = android.os.Bundle().apply { putCharSequence(input.resultKey, text) }
+        android.app.RemoteInput.addResultsToIntent(arrayOf(input), intent, results)
+        runCatching { n.replyIntent?.send(this, 0, intent) }
+            .onFailure { showStatus(Status(R.drawable.ic_message, ORANGE, "Reply", "Could not send", GREY)) }
+        handler.removeCallbacks(clearNotif)
+        notif = null
+        render()
+    }
+
+    // ── Clipboard history (opt-in) ──────────────────────────────────────────
+
+    private fun rememberCopy(text: String) {
+        if (!cfg.clipHistory || text.isBlank()) return
+        val items = loadCopies().toMutableList()
+        items.remove(text)
+        items.add(0, text.take(500))
+        prefs().edit().putString(Prefs.CLIP_ITEMS, encodeCopies(items.take(20))).apply()
+    }
+
+    private fun loadCopies(): List<String> = runCatching {
+        val raw = prefs().getString(Prefs.CLIP_ITEMS, null) ?: return emptyList()
+        val arr = org.json.JSONArray(raw)
+        (0 until arr.length()).map { arr.getString(it) }
+    }.getOrDefault(emptyList())
+
+    private fun encodeCopies(items: List<String>): String {
+        val arr = org.json.JSONArray()
+        items.forEach { arr.put(it) }
+        return arr.toString()
+    }
+
+    private fun prefs() = Prefs.get(this)
+
+    private fun showBatteryCard(v: IslandView, level: Int, plugged: Boolean) {
+        val bm = getSystemService(BatteryManager::class.java)
+        val microAmps = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
+        val chargeUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: Int.MIN_VALUE
+        val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+        val hours = if (microAmps > 0 && chargeUah > 0) chargeUah.toFloat() / microAmps else -1f
+
+        val parts = buildList {
+            add(if (plugged) "$level% · charging" else "$level%")
+            if (microAmps != Int.MIN_VALUE) add("%.0f mA".format(abs(microAmps) / 1000f))
+            if (temp != Int.MIN_VALUE) add("%.1f °C".format(temp / 10f))
+            if (hours > 0f) add("~%dh %02dm to full".format(hours.toInt(), ((hours % 1) * 60).toInt()))
+        }
+        v.showActions(
+            R.drawable.ic_battery, GREEN, "Battery", parts.joinToString(" · "), emptyList(),
+        )
+    }
+
     private fun updateVisibility() {
         val v = island ?: return
         val lp = params ?: return
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val visible = cfg.enabled && !(landscape && cfg.hideLandscape)
+        val blocked = foregroundPkg in cfg.hiddenApps || (cfg.hideImmersive && isImmersive())
+        val visible = cfg.enabled && !blocked && !(landscape && cfg.hideLandscape)
         v.visibility = if (visible) View.VISIBLE else View.GONE
         if (!visible) onTouchArea(null)
     }
@@ -1054,6 +1202,11 @@ class IslandService : AccessibilityService(),
                 statusExpanded = !statusExpanded
                 render()
             }
+            Mode.CHARGING -> {
+                // The charging pill opens into the numbers the status bar can't show.
+                chargeExpanded = !chargeExpanded
+                render()
+            }
             Mode.HOTSPOT -> {
                 // Open the system hotspot / tethering settings when possible.
                 runCatching {
@@ -1092,7 +1245,43 @@ class IslandService : AccessibilityService(),
             n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) ->
                 expandNotification(n, controls = true)
             media != null && cfg.media && v.mode != Mode.MEDIA -> expandMedia()
-            else -> v.bounce()
+            // Already on the player: switch to the phone's other active session
+            // (podcast vs music) instead of doing nothing.
+            v.mode == Mode.MEDIA -> IslandBus.switchMediaSource()
+            else -> showTimerPresets()
+        }
+    }
+
+    /** Long-press with nothing else to do: offer timers you can actually start. */
+    private fun showTimerPresets() {
+        val presets = listOf("5 min" to 5, "10 min" to 10, "25 min" to 25)
+        card = Card(
+            badge = R.drawable.ic_timer,
+            tint = 0xFFFF9F0A.toInt(),
+            kind = "Timer",
+            text = "Start a timer",
+            actions = presets.map { (label, minutes) ->
+                IslandView.Action(label, null, 0) { startTimer(minutes) }
+            },
+        )
+        render()
+        handler.removeCallbacks(clearCard)
+        handler.postDelayed(clearCard, 8000)
+    }
+
+    private fun startTimer(minutes: Int) {
+        card = null
+        render()
+        runCatching {
+            startActivity(
+                Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
+                    .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, minutes * 60)
+                    .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Island timer")
+                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            showStatus(Status(R.drawable.ic_timer, ORANGE, "Timer", "No clock app", GREY))
         }
     }
 
@@ -1131,6 +1320,14 @@ class IslandService : AccessibilityService(),
         // A call or timer is only hidden here, never removed from the shade.
         val hide = IslandView.Action("Hide", null, 0) { nextNotification() }
         val open = IslandView.Action("Open", null, R.drawable.ic_open) { openNotification(n) }
+        // Opt-in canned replies: answer without a keyboard and without leaving
+        // the island. Only shown when the notification actually has a reply action.
+        if (n.replyIntent != null && n.replyInput != null && cfg.quickReplies) {
+            val canned = cfg.cannedReplies.take(3).map { text ->
+                IslandView.Action(text, null, R.drawable.ic_message) { sendReply(n, text) }
+            }
+            return canned + hide
+        }
         if (!controls || n.actions.isEmpty()) return listOf(hide, open)
         val own = n.actions.take(2).map { a ->
             IslandView.Action(a.title, null, 0) {
@@ -1143,13 +1340,73 @@ class IslandService : AccessibilityService(),
         return own + hide + open
     }
 
-    /** Flick sideways: on the open player it changes song; otherwise it dismisses. */
+    /**
+     * Flick sideways: on the open player it changes song. Everywhere else it
+     * cycles through the activities that are on screen right now, iOS-style,
+     * instead of throwing the current one away.
+     */
     override fun onSwipeSideways(toLeft: Boolean) {
         val v = island ?: return
-        when {
-            v.mode == Mode.MEDIA -> if (toLeft) onNext() else onPrev()
-            else -> onSwipeUp()
+        if (v.mode == Mode.MEDIA) {
+            if (toLeft) onNext() else onPrev()
+            return
         }
+        val order = buildList {
+            if (media != null && cfg.media) add(Mode.COMPACT_MEDIA)
+            if (notif != null) add(Mode.NOTIFICATION)
+            if (cfg.hotspotDevices && hotspot?.hotspotOn == true) add(Mode.HOTSPOT)
+            if (charge != null) add(Mode.CHARGING)
+            if (status != null) add(Mode.STATUS)
+        }
+        if (order.isEmpty()) {
+            onSwipeUp()
+            return
+        }
+        val current = order.indexOf(v.mode).takeIf { it >= 0 } ?: -1
+        val step = if (toLeft) 1 else -1
+        val next = order[Math.floorMod(current + step, order.size)]
+        swipeFocus = next
+        swipeFocusUntil = SystemClock.uptimeMillis() + 6000
+        render()
+    }
+
+    private var swipeFocus: Mode? = null
+    private var swipeFocusUntil = 0L
+
+    /** Draw the item the user flicked to, if it is still active. */
+    private fun renderFocus(
+        v: IslandView,
+        focus: Mode,
+        media: MediaState?,
+        notif: NotifEvent?,
+        charge: Pair<Int, Boolean>?,
+        status: Status?,
+        hotspotOn: Boolean,
+    ): Boolean {
+        when (focus) {
+            Mode.COMPACT_MEDIA -> {
+                val m = media ?: return false
+                v.showCompactMedia(m)
+            }
+            Mode.NOTIFICATION -> {
+                val n = notif ?: return false
+                v.showLiveActivity(n.liveKind, n.title, n.text)
+            }
+            Mode.HOTSPOT -> {
+                if (!hotspotOn) return false
+                v.showHotspot(hotspot?.hotspotClients ?: 0)
+            }
+            Mode.CHARGING -> {
+                val c = charge ?: return false
+                v.showCharging(c.first, c.second)
+            }
+            Mode.STATUS -> {
+                val st = status ?: return false
+                v.showStatus(st.icon, st.tint, st.title, st.value, st.valueColor)
+            }
+            else -> return false
+        }
+        return true
     }
 
 
@@ -1179,6 +1436,39 @@ class IslandService : AccessibilityService(),
     override fun onPrev() {
         media?.controller?.transportControls?.skipToPrevious()
         rearmMediaCollapse()
+    }
+
+    /**
+     * Volume keys: draw the level as a pill.
+     *
+     * The key is never swallowed — the phone's own volume change still happens;
+     * the island just reflects it. Needs canRequestFilterKeyEvents (config xml).
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            handler.postDelayed({ showVolume() }, 60)
+        }
+        return super.onKeyEvent(event)
+    }
+
+    private fun showVolume() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val level = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val pct = if (max > 0) (level * 100 / max) else 0
+        showStatus(
+            Status(
+                if (level == 0) R.drawable.ic_bell_off else R.drawable.ic_bell,
+                if (level == 0) GREY else BLUE,
+                "Volume",
+                "$pct%",
+                if (level == 0) GREY else WHITE,
+            ),
+            1500,
+        )
     }
 
     override fun onPlayPause() {
@@ -1281,6 +1571,8 @@ class IslandService : AccessibilityService(),
         val COPY_WORD = Regex("\\bcopy\\b")
         const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
+        /** How long a preview pill from settings stays on screen. */
+        const val PREVIEW_MS = 5000L
         const val BLUE = 0xFF0A84FF.toInt()
         const val GREEN = 0xFF30D158.toInt()
         const val RED = 0xFFFF453A.toInt()

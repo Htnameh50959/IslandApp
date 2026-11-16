@@ -19,6 +19,15 @@ Works on Android 9 and newer. Tested on a vivo Y200 (Android 15).
 | Earbuds / silent / DND | Shows earbuds name and battery, and silent / vibrate / ring / Do Not Disturb changes. |
 | Unlock animation | When a locked phone wakes, a Face ID-style scan; when it unlocks, a green face, fingerprint or open lock showing what unlocked it, also when face unlock keeps you on the lock screen. Animation only — your phone does the real unlock. |
 | Charging | Green bolt and battery level when you plug in. |
+| Quick Settings tile | Turn the island on or off from the shade, without opening the app. |
+| Hidden apps | Pick apps (games, banking, camera) where the island never appears. |
+| Preview every pill | A button per mode in **Try it**, so you can check the look without waiting for a real event. |
+| Settings import / export | Move all preferences between phones as a JSON file. |
+| Video apps | Add your own video apps on top of the built-in list, from settings. |
+| Shape & glow | Corner-roundness and glow-strength sliders. |
+| Volume pill | Press a volume key and the level appears on the island (the key still works normally). |
+| Battery detail | Tap the charging pill for current draw, temperature and time to full. |
+| Timers you can set | Long-press the idle island for 5 / 10 / 25-minute timer presets. |
 
 **Music vs video:** apps in a built-in list of video apps (`VIDEO_PACKAGES` in `IslandBus.kt`) get the video pill. Everything else gets the music pill. Android can't tell video from audio, so add an app's package name to that list if it's missing.
 
@@ -38,7 +47,7 @@ If it's slightly off, nudge it with the **Move up or down** and **Move left or r
 
 ### Option 1: download the app
 
-1. Download `Island.apk` from the [Releases page](https://github.com/GITHUB_USER/island-app/releases) on your phone.
+1. Download the latest `Island-v*.apk` from the [Releases page](https://github.com/Htnameh50959/IslandApp/releases) on your phone.
 2. Open it and allow installing from your browser or file manager when Android asks.
 
 ### Option 2: install from a computer
@@ -54,13 +63,23 @@ adb install -r Island.apk
 Needs the Android SDK and JDK 17 or newer.
 
 ```sh
-git clone https://github.com/GITHUB_USER/island-app.git
-cd island-app
+git clone https://github.com/Htnameh50959/IslandApp.git
+cd IslandApp
 ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is signed with the debug key so it installs as-is.
+Release builds are minified with R8 and signed (CI attaches one APK per `v*` tag).
+
+### Why not on the Play Store?
+
+Island uses an AccessibilityService to draw its overlay, and it is designed for
+sideloading. Google Play restricts the Accessibility API to accessibility
+purposes, so a decorative overlay would be rejected. Install from GitHub
+Releases (or an F-Droid-style repository) and read the setup steps above before
+turning the service on. A `SYSTEM_ALERT_WINDOW` overlay is not a drop-in
+alternative: it cannot draw over the status bar on modern Android, which is
+exactly where the island lives.
 
 ## Set it up
 
@@ -70,7 +89,7 @@ Open **Island** and go through the three steps:
 2. **Music, calls & timers**: tap **Enable** and allow notification access for **Island**. This powers the music player and live activities (calls, navigation, timers). Ordinary notifications are not shown in the island.
 3. **Earbuds pop-ups**: tap **Allow** to grant "Nearby devices" (Bluetooth), so it can show your earbuds' name and battery.
 
-Every feature can be switched on or off in the app.
+Every feature can be switched on or off in the app. **Copy suggestions** starts off: when you enable it, Android will show its clipboard notice each time you copy something.
 
 ## If it isn't working
 
@@ -93,6 +112,8 @@ Every feature can be switched on or off in the app.
 ## Privacy
 
 - Copied text is only kept in memory long enough to show the card. It is never saved or sent anywhere.
+- Copy suggestions are **off by default**. When you turn them on, the app briefly takes window focus to read the clipboard, which is why Android shows its "Island pasted from your clipboard" notice.
+- With copy suggestions on, copied text is also handed to a build of Notify Bridge (PhoneLink) signed with the same key, through a signature-level permission. That is the only outbound data path; the app itself still has no internet permission.
 - Music info and call, navigation and timer notifications are only used to draw the island.
 - The app has no internet permission.
 
@@ -115,8 +136,8 @@ Every feature can be switched on or off in the app.
 
 ## Related
 
-- [Custom Island](https://github.com/GITHUB_USER/custom-island): the same island for the GNOME desktop on Linux.
-- [Notify Bridge](https://github.com/GITHUB_USER/notify-bridge): your phone's notifications on your Linux PC over Bluetooth.
+- [Custom Island](https://github.com/Htnameh50959/CustomIsland-for-laptop): the same island for the GNOME desktop on Linux.
+- [PhoneLink](https://github.com/Htnameh50959/PhoneLink): your phone's notifications on your Linux PC over Bluetooth.
 
 ## License
 

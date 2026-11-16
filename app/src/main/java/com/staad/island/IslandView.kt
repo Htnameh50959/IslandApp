@@ -121,6 +121,16 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     // ── Drawing surfaces ────────────────────────────────────────────────────
     private val rect = RectF()
+    // onDraw runs on every frame while a spring settles. Rebuilding four
+    // LinearGradients each frame meant thousands of short-lived objects per
+    // second on the main thread; keep the last ones and only rebuild when the
+    // geometry or colour they were built from actually changes.
+    private var bodyShaderTop = Float.NaN
+    private var bodyShaderBottom = Float.NaN
+    private var bodyShaderAlpha = -1
+    private var washShaderKey = 0
+    private var sheenShaderKey = 0
+    private var rimShaderKey = 0
     private val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -166,11 +176,18 @@ class IslandView(context: Context) : FrameLayout(context) {
             // into the camera.
             val big = ((rect.height() / max(1f, compactH().toFloat())) - 1.2f).coerceIn(0f, 1f)
             val topAlpha = (0xF4 - 0x10 * big).roundToInt()
-            pillPaint.shader = LinearGradient(
-                0f, rect.top, 0f, rect.bottom,
-                Color.argb(topAlpha, 0x1E, 0x1E, 0x24), Color.argb(0xF8, 0x04, 0x04, 0x06),
-                Shader.TileMode.CLAMP,
-            )
+            if (bodyShaderTop != rect.top || bodyShaderBottom != rect.bottom ||
+                bodyShaderAlpha != topAlpha
+            ) {
+                pillPaint.shader = LinearGradient(
+                    0f, rect.top, 0f, rect.bottom,
+                    Color.argb(topAlpha, 0x1E, 0x1E, 0x24), Color.argb(0xF8, 0x04, 0x04, 0x06),
+                    Shader.TileMode.CLAMP,
+                )
+                bodyShaderTop = rect.top
+                bodyShaderBottom = rect.bottom
+                bodyShaderAlpha = topAlpha
+            }
             canvas.drawRoundRect(rect, r, r, pillPaint)
             // Big cards get a soft wash of the app's / album's colour rising from
             // the bottom edge, like OriginOS 6's timer and music cards.
@@ -178,31 +195,43 @@ class IslandView(context: Context) : FrameLayout(context) {
             val tint = tintColor
             if (tint != null && tall > 0f && tintLevel > 0f) {
                 val a = (0x5C * tall * tintLevel).roundToInt().coerceIn(0, 255)
-                sheenPaint.shader = LinearGradient(
-                    0f, rect.top + rect.height() * 0.35f, 0f, rect.bottom,
-                    Color.argb(0, Color.red(tint), Color.green(tint), Color.blue(tint)),
-                    Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
-                    Shader.TileMode.CLAMP,
-                )
+                val washKey = (tint * 31 + a) * 31 + (rect.height() * 100).toInt()
+                if (washShaderKey != washKey) {
+                    sheenPaint.shader = LinearGradient(
+                        0f, rect.top + rect.height() * 0.35f, 0f, rect.bottom,
+                        Color.argb(0, Color.red(tint), Color.green(tint), Color.blue(tint)),
+                        Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
+                        Shader.TileMode.CLAMP,
+                    )
+                    washShaderKey = washKey
+                }
                 canvas.drawRoundRect(rect, r, r, sheenPaint)
             }
             // Glass highlight along the top, and a hairline rim that is brighter
             // at the top edge (soft neumorphic depth). Only on the open cards.
             if (big > 0f) {
-                sheenPaint.shader = LinearGradient(
-                    0f, rect.top, 0f, rect.top + min(rect.height() * 0.4f, dp(56).toFloat()),
-                    Color.argb((0x1C * big).roundToInt(), 255, 255, 255), 0x00FFFFFF,
-                    Shader.TileMode.CLAMP,
-                )
+                val sheenKey = (rect.top * 31 + rect.height() * 31 + big * 7).toInt()
+                if (sheenShaderKey != sheenKey) {
+                    sheenPaint.shader = LinearGradient(
+                        0f, rect.top, 0f, rect.top + min(rect.height() * 0.4f, dp(56).toFloat()),
+                        Color.argb((0x1C * big).roundToInt(), 255, 255, 255), 0x00FFFFFF,
+                        Shader.TileMode.CLAMP,
+                    )
+                    sheenShaderKey = sheenKey
+                }
                 canvas.drawRoundRect(rect, r, r, sheenPaint)
                 val sw = rimPaint.strokeWidth / 2f
                 rimRect.set(rect.left + sw, rect.top + sw, rect.right - sw, rect.bottom - sw)
-                rimPaint.shader = LinearGradient(
-                    0f, rect.top, 0f, rect.bottom,
-                    Color.argb((0x40 * big).roundToInt(), 255, 255, 255),
-                    Color.argb((0x0E * big).roundToInt(), 255, 255, 255),
-                    Shader.TileMode.CLAMP,
-                )
+                val rimKey = (rect.top * 31 + rect.bottom * 31 + big * 13).toInt()
+                if (rimShaderKey != rimKey) {
+                    rimPaint.shader = LinearGradient(
+                        0f, rect.top, 0f, rect.bottom,
+                        Color.argb((0x40 * big).roundToInt(), 255, 255, 255),
+                        Color.argb((0x0E * big).roundToInt(), 255, 255, 255),
+                        Shader.TileMode.CLAMP,
+                    )
+                    rimShaderKey = rimKey
+                }
                 canvas.drawRoundRect(rimRect, max(r - sw, 0f), max(r - sw, 0f), rimPaint)
             }
         }
@@ -1060,7 +1089,9 @@ class IslandView(context: Context) : FrameLayout(context) {
         return compactH() / 2 + geometry.holeH / 2 + dp(10)
     }
 
-    private fun cornerRadius() = min(sr.value * sPress.value, rect.height() / 2f)
+    /** Rounded corners follow the user's Look slider (50–150 %). */
+    private fun cornerRadius() =
+        min(sr.value * sPress.value * (cfg.cornerPercent / 100f), rect.height() / 2f)
 
     private fun fillNotification(n: NotifEvent, expanded: Boolean, actions: List<Action>) {
         val photo = n.icon
@@ -1335,7 +1366,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         val breathe = if (pulse.isRunning) 0.7f + 0.3f * sin(pulsePhase * 2f * Math.PI.toFloat()) else 1f
         // a glow on a pill that's still tiny looks like a smudge: let it grow in with the island
         val size = (rect.height() / max(1f, compactH().toFloat())).coerceIn(0f, 1f)
-        return glowLevel * breathe * size
+        return glowLevel * breathe * size * (cfg.glowPercent / 100f)
     }
 
     // ── Content cross-fades ─────────────────────────────────────────────────
