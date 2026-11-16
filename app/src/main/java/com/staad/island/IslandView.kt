@@ -1416,6 +1416,12 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun expandedWidth() = min(resources.displayMetrics.widthPixels - dp(28), dp(400))
 
+    /** Widest the pill can be while the 32dp bubble still fits beside it. */
+    private fun widthWithBubble(): Int {
+        val screenW = if (geometry.screenW > 0) geometry.screenW else resources.displayMetrics.widthPixels
+        return screenW - dp(12) - 2 * dp(40)
+    }
+
     private fun sizeLayer(layer: View, w: Int, h: Int) {
         val lp = layer.layoutParams
         if (lp.width != w || lp.height != h) {
@@ -1425,7 +1431,11 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun morph(w: Int, h: Int, r: Float, layer: View?) {
+    private fun morph(width: Int, h: Int, r: Float, layer: View?) {
+        // The companion bubble sits to the right of the pill: a wide status pill
+        // (a running stopwatch) otherwise pushes it off the screen edge and the
+        // dual layout looks like a single pill.
+        val w = if (secondaryKind == SecondaryKind.NONE) width else min(width, widthWithBubble())
         if (layer !== notifLayer && layer !== actionLayer && layer !== mediaLayer) setTint(null)
         if (layer !== currentLayer) swapContent(layer, null)
 
@@ -1678,22 +1688,26 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun actionButton(a: Action) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        val iconView = ImageView(context).apply {
-            if (a.icon != null) {
-                // the real app's icon, like OriginOS's app suggestions
-                setImageDrawable(a.icon)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-            } else {
-                setImageResource(a.glyph)
-                imageTintList = ColorStateList.valueOf(Color.WHITE)
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-                val pad = dp(11)
-                setPadding(pad, pad, pad, pad)
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(chip) }
+        // A button with neither an app icon nor a glyph is text-only: an empty
+        // circle over its label looked like a broken button.
+        if (a.icon != null || a.glyph != 0) {
+            val iconView = ImageView(context).apply {
+                if (a.icon != null) {
+                    // the real app's icon, like OriginOS's app suggestions
+                    setImageDrawable(a.icon)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                } else {
+                    setImageResource(a.glyph)
+                    imageTintList = ColorStateList.valueOf(Color.WHITE)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    val pad = dp(11)
+                    setPadding(pad, pad, pad, pad)
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(chip) }
+                }
             }
+            addView(iconView, LinearLayout.LayoutParams(dp(44), dp(44)))
         }
-        addView(iconView, LinearLayout.LayoutParams(dp(44), dp(44)))
-        addView(label(11.5f, Color.WHITE).apply {
+        addView(label(if (a.icon != null || a.glyph != 0) 11.5f else 13f, Color.WHITE).apply {
             text = a.label
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(5) })

@@ -101,6 +101,8 @@ object IslandBus {
         fun onPrefsChanged()
         /** Show a fake pill so every mode can be checked on-device. */
         fun onPreview(mode: String)
+        /** Open the timer / stopwatch card (Quick Settings tile, shortcut). */
+        fun onTimers() {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -144,6 +146,11 @@ object IslandBus {
 
     fun postPreview(mode: String) {
         main.post { listener?.onPreview(mode) }
+    }
+
+    /** Ask the island to show its timer / stopwatch card. */
+    fun postTimers() {
+        main.post { listener?.onTimers() }
     }
 
     fun postRemoved(key: String) {

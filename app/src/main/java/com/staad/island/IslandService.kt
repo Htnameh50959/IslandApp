@@ -254,12 +254,12 @@ class IslandService : AccessibilityService(),
 
     private fun timerActions(t: IslandTimer): List<IslandView.Action> = buildList {
         if (t.running) {
-            add(IslandView.Action("Pause", null, 0) { pauseTimer() })
+            add(IslandView.Action("Pause", null, R.drawable.ic_pause) { pauseTimer() })
         } else {
             add(IslandView.Action("Start", null, R.drawable.ic_play) { resumeTimer() })
         }
-        add(IslandView.Action("Reset", null, 0) { resetTimer() })
-        add(IslandView.Action("Stop", null, 0) { stopTimer() })
+        add(IslandView.Action("Reset", null, R.drawable.ic_rotate) { resetTimer() })
+        add(IslandView.Action("Stop", null, R.drawable.ic_stop) { stopTimer() })
     }
 
     /** Keeps the pill's clock moving while the timer runs. */
@@ -1105,6 +1105,11 @@ class IslandService : AccessibilityService(),
     private var previewMode: String? = null
     private var previewUntil = 0L
 
+    /** Quick Settings tile / shortcut: the timer and stopwatch card. */
+    override fun onTimers() {
+        showTimerPresets()
+    }
+
     override fun onPreview(mode: String) {
         previewMode = mode
         previewUntil = SystemClock.uptimeMillis() + PREVIEW_MS
@@ -1661,8 +1666,10 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         when (v.mode) {
             // A tap on the open live card goes to the app.
+            // One tap opens the card with every button the app offers; there is
+            // nothing left for a long-press to reveal.
             Mode.NOTIFICATION -> notif?.let { n ->
-                if (liveExpanded) openNotification(n) else expandNotification(n, controls = false)
+                if (liveExpanded) openNotification(n) else expandNotification(n, controls = true)
             }
             // A live pill (timer, call, navigation) opens into its card.
             Mode.LIVE -> when {
@@ -1670,7 +1677,7 @@ class IslandService : AccessibilityService(),
                     timerExpanded = !timerExpanded
                     render()
                 }
-                else -> notif?.let { expandNotification(it, controls = false) }
+                else -> notif?.let { expandNotification(it, controls = true) }
             }
             Mode.ACTIONS -> when {
                 statusExpanded -> {
@@ -1716,7 +1723,9 @@ class IslandService : AccessibilityService(),
                 render()
             }
             Mode.IDLE, Mode.COMPACT_MEDIA ->
-                if (media != null && cfg.media) expandMedia() else v.bounce()
+                // A tap is the way in: an empty island offers timers and the
+                // stopwatch, a music pill opens the player.
+                if (media != null && cfg.media) expandMedia() else showTimerPresets()
             Mode.MEDIA -> {
                 media?.controller?.sessionActivity?.let { send(it) }
                 handler.removeCallbacks(collapseMedia)
@@ -1730,10 +1739,18 @@ class IslandService : AccessibilityService(),
         val v = island ?: return
         val n = notif
         when {
-            // Long-press: the card with additional controls (the app's own buttons).
-            n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) ->
-                expandNotification(n, controls = true)
-            media != null && cfg.media && v.mode != Mode.MEDIA -> expandMedia()
+            // The tap already opened every button, so a long-press adds nothing
+            // here (and must not open the timer card over a notification).
+            n != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE) -> Unit
+            // A timer or stopwatch is already running: long-press opens its own
+            // card (Start/Pause · Reset · Stop), not the card for starting a new one.
+            timerState != null && v.mode != Mode.MEDIA -> {
+                timerExpanded = true
+                render()
+            }
+            // Tapping the music pill already opens the player, so the long-press
+            // there is free: it opens the timer / stopwatch card.
+            media != null && cfg.media && v.mode != Mode.MEDIA -> showTimerPresets()
             // Already on the player: switch to the phone's other active session
             // (podcast vs music) instead of doing nothing.
             v.mode == Mode.MEDIA -> IslandBus.switchMediaSource()
@@ -1804,7 +1821,7 @@ class IslandService : AccessibilityService(),
             return canned + hide
         }
         if (!controls || n.actions.isEmpty()) return listOf(hide, open)
-        val own = n.actions.take(2).map { a ->
+        val own = n.actions.take(3).map { a ->
             IslandView.Action(a.title, null, 0) {
                 send(a.intent)
                 // Live activities update themselves (Pause → Resume): keep the card open.
@@ -1812,7 +1829,10 @@ class IslandService : AccessibilityService(),
                 handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
             }
         }
-        return own + hide + open
+        // Tapping the open card already opens the app, so Open gives way to the
+        // app's own buttons: the card fits four, and the timer's Stop / Reset /
+        // +1 min must not be cut off.
+        return own + hide
     }
 
     /**
