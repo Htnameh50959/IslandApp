@@ -1082,9 +1082,23 @@ class IslandService : AccessibilityService(),
         event.chronometerBase > 0L || event.liveKind == LiveKind.CALL ||
             event.liveKind == LiveKind.TIMER || event.liveKind == LiveKind.NAVIGATION
 
+    /**
+     * A normal app notification (a message, an order, a download…) as opposed to
+     * a call / timer / navigation live activity. These behave like a real card:
+     * they stay big until the user puts them away, and swiping up removes them
+     * completely instead of folding them into a small pill.
+     */
+    private fun isNotificationCard(event: NotifEvent): Boolean =
+        event.liveKind == LiveKind.ACTIVITY &&
+            (event.selectedAppNotification || event.replyIntent != null)
+
     /** The pill folds back on its own; one with more to read stays a little longer. */
     private fun armNotifTimeout(event: NotifEvent) {
         handler.removeCallbacks(clearNotif)
+        // An ordinary notification stays as the big card until the user dismisses
+        // it (swipe up / Hide) or removes it from the shade. Live activities still
+        // fold back to their compact pill on their own.
+        if (isNotificationCard(event)) return
         // An activity that is still running stays on the island until its
         // notification goes away: folding it back after a few seconds would hide
         // the countdown (or the call) that is the whole point.
@@ -1822,11 +1836,18 @@ class IslandService : AccessibilityService(),
         if (DEBUG_COPY) android.util.Log.i("IslandCopy", "swipe up")
         // An open card first folds back; a live pill is put away.
         val v = island
-        if (notif != null && v != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE)) {
+        val n = notif
+        if (n != null && v != null && (v.mode == Mode.NOTIFICATION || v.mode == Mode.LIVE)) {
+            // Notifications are one gesture: the big card goes away completely,
+            // with no small pill left behind. Calls / timers keep folding back.
+            if (isNotificationCard(n)) {
+                nextNotification()
+                return
+            }
             if (liveExpanded) {
                 liveExpanded = false
                 notifControls = false
-                notif?.let { armNotifTimeout(it) }
+                armNotifTimeout(n)
                 render()
             } else {
                 nextNotification()
@@ -1844,7 +1865,8 @@ class IslandService : AccessibilityService(),
         liveExpanded = true
         notifControls = controls
         handler.removeCallbacks(clearNotif)
-        handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
+        // A normal notification has no auto-close: it waits for swipe up / Hide.
+        if (!isNotificationCard(n)) handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
         render()
     }
 
@@ -1866,8 +1888,10 @@ class IslandService : AccessibilityService(),
             IslandView.Action(a.title, null, 0) {
                 send(a.intent)
                 // Live activities update themselves (Pause → Resume): keep the card open.
+                // A normal notification also stays until it is dismissed; its app
+                // usually removes it from the shade, which clears the card anyway.
                 handler.removeCallbacks(clearNotif)
-                handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
+                if (!isNotificationCard(n)) handler.postDelayed(clearNotif, EXPANDED_HOLD_MS)
             }
         }
         // Tapping the open card already opens the app, so Open gives way to the
@@ -1973,9 +1997,10 @@ class IslandService : AccessibilityService(),
             timerExpanded = false
             changed = true
         }
-        // Touching the app below folds an open live card back.
+        // Touching the app below folds an open live card back. A notification
+        // card stays put: only swipe up (or Hide) puts it away.
         val n = notif
-        if (n != null && liveExpanded) {
+        if (n != null && liveExpanded && !isNotificationCard(n)) {
             liveExpanded = false
             notifControls = false
             armNotifTimeout(n)
