@@ -327,13 +327,13 @@ class IslandService : AccessibilityService(),
                 Intent.ACTION_SCREEN_ON -> if (cfg.faceId) {
                     android.util.Log.d("IslandFaceID", "ACTION_SCREEN_ON received, calling maybeStartFaceScan")
                     screenOnAt = SystemClock.uptimeMillis()
-                    unlockShown = false
                     maybeStartFaceScan()
                     watchForUnlock()
                 }
                 Intent.ACTION_USER_PRESENT -> finishFaceScan(unlocked = true)
                 Intent.ACTION_SCREEN_OFF -> {
                     faceScanActive = false
+                    unlockSessionActive = false
                     unlockShown = false
                     handler.removeCallbacks(unlockPoll)
                     if (status?.title == "Face ID") {
@@ -532,6 +532,8 @@ class IslandService : AccessibilityService(),
     private var screenOnAt = 0L
     /** True only while a lock-screen face check is in progress. */
     private var faceScanActive = false
+    /** True only after this service has observed a locked session for this wake. */
+    private var unlockSessionActive = false
 
     /** Face unlock is set up for the lock screen. With it off (PIN / fingerprint only) the Face ID pill never shows. */
     private fun faceUnlockOn(): Boolean = runCatching {
@@ -541,6 +543,9 @@ class IslandService : AccessibilityService(),
     private fun maybeStartFaceScan() {
         android.util.Log.d("IslandFaceID", "maybeStartFaceScan called cfg.faceId=$cfg.faceId faceScanActive=$faceScanActive")
         if (!cfg.faceId) return
+        val keyguard = getSystemService(KeyguardManager::class.java) ?: return
+        if (!keyguard.isDeviceSecure || !keyguard.isDeviceLocked || unlockShown) return
+        unlockSessionActive = true
         faceScanActive = true
         startFaceScan()
         watchForUnlock()
@@ -554,6 +559,7 @@ class IslandService : AccessibilityService(),
     private fun finishFaceScan(unlocked: Boolean) {
         if (!unlocked || !cfg.faceId) {
             faceScanActive = false
+            unlockSessionActive = false
             if (status?.title == "Face ID") {
                 handler.removeCallbacks(clearStatus); status = null; render()
             }
@@ -582,6 +588,7 @@ class IslandService : AccessibilityService(),
 
     /** The unlock pill already showed for this wake (the swipe that follows isn't a second unlock). */
     private var unlockShown = false
+    private var lastKeyguardLocked: Boolean? = null
     /** Last time the lock screen's PIN / pattern / password pad was used. */
     private var bouncerUsedAt = 0L
     private var unlockPollUntil = 0L
@@ -608,10 +615,11 @@ class IslandService : AccessibilityService(),
 
     private fun onDeviceUnlocked(keyguardShowing: Boolean) {
         handler.removeCallbacks(unlockPoll)
-        if (!cfg.faceId || unlockShown) return
+        if (!cfg.faceId || unlockShown || !unlockSessionActive) return
         val km = getSystemService(KeyguardManager::class.java)
         if (km?.isDeviceSecure != true) return // swipe-only lock: nothing to show
         unlockShown = true
+        unlockSessionActive = false
         val now = SystemClock.uptimeMillis()
         val faceStays = Prefs.get(this).getBoolean(PREF_FACE_STAYS, false)
         val method = when {
@@ -645,12 +653,13 @@ class IslandService : AccessibilityService(),
         if (!cfg.faceId) return@KeyguardLockedStateListener
         android.util.Log.d("IslandFaceID", "keyguardListener locked=$locked faceScanActive=$faceScanActive")
         if (locked) {
-            unlockShown = false
+            if (lastKeyguardLocked != true) unlockShown = false
             screenOnAt = SystemClock.uptimeMillis()
             maybeStartFaceScan()
         } else {
             finishFaceScan(unlocked = true)
         }
+        lastKeyguardLocked = locked
     }
 
     /**
@@ -997,6 +1006,20 @@ class IslandService : AccessibilityService(),
         handler.post {
             cfg = IslandConfig.load(this)
             IslandBus.videoApps = cfg.videoApps
+            if (!cfg.notificationsEnabled || notif?.let {
+                    !isLiveKindEnabled(it.liveKind, cfg) ||
+                            (it.selectedAppNotification && !isNotificationAppSelected(
+                                it.packageName,
+                                cfg.notificationRules,
+                                cfg.notificationRulesConfigured,
+                            ))
+                } == true
+            ) {
+                handler.removeCallbacks(clearNotif)
+                notif = null
+                liveExpanded = false
+                notifControls = false
+            }
             island?.cfg = cfg
             applyPosition()
             render()
@@ -1030,7 +1053,12 @@ class IslandService : AccessibilityService(),
         if (notif?.key == event.key) {
             // Same activity updated (timer ticking, next turn): refresh in place.
             notif = event
-            if (!liveExpanded) armNotifTimeout(event)
+            liveExpanded = event.liveKind == LiveKind.CALL ||
+                event.liveKind == LiveKind.ACTIVITY || event.liveKind == LiveKind.NONE ||
+                event.selectedAppNotification || event.replyIntent != null
+            notifControls = event.liveKind == LiveKind.CALL ||
+                event.selectedAppNotification || event.replyIntent != null
+            armNotifTimeout(event)
             render()
         } else {
             present(event)
@@ -1039,8 +1067,11 @@ class IslandService : AccessibilityService(),
 
     private fun present(event: NotifEvent) {
         notif = event
-        liveExpanded = false
-        notifControls = false
+        liveExpanded = event.liveKind == LiveKind.CALL ||
+            event.liveKind == LiveKind.ACTIVITY || event.liveKind == LiveKind.NONE ||
+            event.selectedAppNotification || event.replyIntent != null
+        notifControls = event.liveKind == LiveKind.CALL ||
+            event.selectedAppNotification || event.replyIntent != null
         mediaExpanded = false
         armNotifTimeout(event)
         render()
@@ -1131,6 +1162,23 @@ class IslandService : AccessibilityService(),
             "charging" -> v.showCharging(72, true)
             "status" -> v.showStatus(R.drawable.ic_bluetooth, BLUE, "Earbuds", "Connected", BLUE)
             "live" -> v.showLiveActivity(LiveKind.TIMER, "Timer", "24:59")
+            "notification" -> v.showNotification(
+                NotifEvent(
+                    key = "preview-notification",
+                    packageName = packageName,
+                    title = "Your order is on the way",
+                    text = "The driver is nearby. Your delivery should arrive in about 5 minutes.",
+                    icon = null,
+                    contentIntent = null,
+                    liveKind = LiveKind.ACTIVITY,
+                    appIcon = getDrawable(R.mipmap.ic_launcher),
+                    appName = "Island Preview",
+                    accent = BLUE,
+                ),
+                expanded = true,
+                actions = listOf(IslandView.Action("Open", null, R.drawable.ic_open) {}),
+                controls = true,
+            )
             "actions" -> v.showActions(
                 R.drawable.ic_copy, GREY, "Copy & Go", "example.com/article", emptyList(),
             )
@@ -1182,7 +1230,7 @@ class IslandService : AccessibilityService(),
         val k = card
         val st = status
         val p = hotspot
-        val hotspotOn = cfg.hotspotDevices && p?.hotspotOn == true
+        val hotspotOn = cfg.notificationsEnabled && cfg.hotspotDevices && p?.hotspotOn == true
         if (!hotspotOn) hotspotExpanded = false
         val focus = swipeFocus?.takeIf { SystemClock.uptimeMillis() < swipeFocusUntil }
         if (focus != null) {
@@ -1280,18 +1328,14 @@ class IslandService : AccessibilityService(),
                     timerTitle(t), timerText(t), timerActions(t),
                 )
             }
-            n != null && n.liveKind == LiveKind.CALL ->
-                v.showNotification(n, expanded = true, actions = notificationActions(n, true), controls = true)
-            // A message or recording card shows its app's icon in the pill: the generic
-            // glyph made every chat message look like the charging pill.
-            n != null -> v.showLiveActivity(
-                n.liveKind, n.title, clockText(n),
-                badge = n.appIcon.takeIf { n.liveKind == LiveKind.ACTIVITY || n.liveKind == LiveKind.NONE },
-            )
             timerState != null -> {
                 val t = timerState!!
                 v.showLiveActivity(LiveKind.TIMER, timerTitle(t), timerText(t))
             }
+            n != null && n.liveKind == LiveKind.TIMER ->
+                v.showLiveActivity(LiveKind.TIMER, n.title, n.text)
+            n != null && n.liveKind == LiveKind.NAVIGATION ->
+                v.showLiveActivity(LiveKind.NAVIGATION, n.title, n.text)
             st != null && st.title == "Face ID" -> v.showFaceId(st.value == "Unlocked", st.icon)
             hotspotOn && hotspotExpanded -> v.showActions(
                 R.drawable.ic_hotspot, GREEN, "Hotspot",

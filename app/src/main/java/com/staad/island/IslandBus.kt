@@ -11,6 +11,23 @@ import android.os.SystemClock
 /** Origin Island-style live activities that stay on the pill until they finish. */
 enum class LiveKind { NONE, CALL, TIMER, NAVIGATION, ACTIVITY }
 
+internal fun isNotificationAppSelected(
+    packageName: String,
+    selectedPackages: Set<String>,
+    selectionConfigured: Boolean,
+): Boolean = !selectionConfigured || packageName in selectedPackages
+
+internal fun isLiveKindEnabled(kind: LiveKind, config: IslandConfig): Boolean {
+    if (!config.notificationsEnabled) return false
+    return when (kind) {
+        LiveKind.NONE -> false
+        LiveKind.CALL -> config.liveCalls
+        LiveKind.TIMER -> config.liveTimers
+        LiveKind.NAVIGATION -> config.liveNavigation
+        LiveKind.ACTIVITY -> config.liveOther
+    }
+}
+
 /** A button from the notification itself ("Pause", "Hang up"...). */
 class NotifAction(val title: String, val intent: PendingIntent)
 
@@ -31,6 +48,8 @@ data class NotifEvent(
     /** Reply action of a chat notification, when the app allows replying. */
     val replyIntent: android.app.PendingIntent? = null,
     val replyInput: android.app.RemoteInput? = null,
+    /** True when this was shown because its app was explicitly selected in settings. */
+    val selectedAppNotification: Boolean = false,
     /** The app icon's main colour, for the glow. */
     val accent: Int = 0xFFFFFFFF.toInt(),
     /** Chonometer base (elapsedRealtime) when the notification shows a running clock. */

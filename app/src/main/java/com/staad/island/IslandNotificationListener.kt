@@ -2,6 +2,8 @@ package com.staad.island
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -14,12 +16,13 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import java.util.Calendar
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
 /**
- * Feeds the island with live activities (calls, navigation, timers) and the
- * active media session. Ordinary notifications are not shown in the island.
+ * Feeds the island with live activities, selected app notifications and the
+ * active media session. Other ordinary notifications stay in the system shade.
  * (Notification access is also what grants permission to read media sessions.)
  */
 class IslandNotificationListener : NotificationListenerService() {
@@ -48,6 +51,17 @@ class IslandNotificationListener : NotificationListenerService() {
     private val prefsListener =
         android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == Prefs.VIDEO) refreshSessions(null)
+            if (key == Prefs.NOTIFICATIONS_ENABLED) {
+                if (IslandConfig.load(applicationContext).notificationsEnabled) {
+                    replayActiveNotifications()
+                } else {
+                    hotspotKey = null
+                    IslandBus.postHotspotClients(null)
+                }
+            }
+            if (key == Prefs.NOTIFICATION_RULES && IslandConfig.load(applicationContext).notificationsEnabled) {
+                replayActiveNotifications()
+            }
         }
 
     override fun onListenerConnected() {
@@ -58,9 +72,9 @@ class IslandNotificationListener : NotificationListenerService() {
             runCatching { nm.deleteNotificationChannel("test") }
         }
         // The hotspot may already be on (and its notification posted) before we connect.
-        runCatching { activeNotifications }.getOrNull().orEmpty().forEach { checkHotspot(it) }
         sessionManager = getSystemService(MediaSessionManager::class.java)
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        if (IslandConfig.load(applicationContext).notificationsEnabled) replayActiveNotifications()
         IslandBus.mediaSwitcher = { cycleSession() }
         try {
             sessionManager?.addOnActiveSessionsChangedListener(sessionsListener, component)
@@ -180,9 +194,18 @@ class IslandNotificationListener : NotificationListenerService() {
 
     // ── Live activities ─────────────────────────────────────────────────────
 
+    private fun replayActiveNotifications() {
+        runCatching { activeNotifications }.getOrNull().orEmpty().forEach {
+            lastContent.remove(it.key)
+            onNotificationPosted(it, null)
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?, rankingMap: RankingMap?) {
         sbn ?: return
         val n = sbn.notification ?: return
+        val config = IslandConfig.load(applicationContext)
+        if (!config.notificationsEnabled) return
         if (checkHotspot(sbn)) return
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return // music is shown by the player
@@ -192,12 +215,20 @@ class IslandNotificationListener : NotificationListenerService() {
         // repliable chat message, which is exactly what that opt-in is for.
         val prefs = Prefs.get(this)
         val reply = replyOf(n)
-        var kind = classifyLive(n, sbn.packageName, sbn.isOngoing)
+        var kind = classifyLive(n, sbn.packageName, sbn.isOngoing, config)
+        val selectedAppNotification = kind == LiveKind.NONE &&
+            isNotificationAppSelected(
+                sbn.packageName,
+                config.notificationRules,
+                config.notificationRulesConfigured,
+            )
         if (kind == LiveKind.NONE) {
-            if (reply == null || !prefs.getBoolean(Prefs.QUICK_REPLIES, false)) return
+            if (!selectedAppNotification &&
+                (reply == null || !prefs.getBoolean(Prefs.QUICK_REPLIES, false))
+            ) return
             kind = LiveKind.ACTIVITY
         }
-        if (!prefs.getBoolean(Prefs.LIVE_ACTIVITIES, true)) return
+        if (!isLiveKindEnabled(kind, config)) return
 
         val appName = appLabel(sbn.packageName)
         val (rawTitle, text) = titleAndText(n)
@@ -218,6 +249,23 @@ class IslandNotificationListener : NotificationListenerService() {
                 chronoCountDown = fromViews.second
                 wallBase = chronoBase > 1_000_000_000_000L
             }
+        }
+
+        // Quiet hours: mute notifications during selected times.
+        val quietHours = prefs.getBoolean(Prefs.QUIET_HOURS, IslandConfig.load(this).quietHours)
+        if (quietHours) {
+            val quietStart = prefs.getInt(Prefs.QUIET_HOURS_START, IslandConfig.load(this).quietHoursStart)
+            val quietEnd = prefs.getInt(Prefs.QUIET_HOURS_END, IslandConfig.load(this).quietHoursEnd)
+            val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+            if (currentHour >= quietStart && currentHour < quietEnd) {
+                return
+            }
+        }
+
+        // Temporary mute: mute for one hour from last interaction.
+        val tempMuteUntil = prefs.getLong(Prefs.TEMP_MUTE, 0L)
+        if (tempMuteUntil > System.currentTimeMillis()) {
+            return
         }
 
         // Live activities re-post often (elapsed time); refresh only when the text changes.
@@ -241,6 +289,7 @@ class IslandNotificationListener : NotificationListenerService() {
                 actions = actionsOf(n),
                 replyIntent = reply?.first,
                 replyInput = reply?.second,
+                selectedAppNotification = selectedAppNotification,
                 accent = appAccent(sbn.packageName),
                 // A timer / stopwatch carries its clock in the extras: the island
                 // ticks it locally instead of waiting for the next update.
@@ -283,13 +332,17 @@ class IslandNotificationListener : NotificationListenerService() {
         return null
     }
 
-    private fun classifyLive(n: Notification, pkg: String, ongoing: Boolean): LiveKind {
+    private fun classifyLive(
+        n: Notification,
+        pkg: String,
+        ongoing: Boolean,
+        cfg: IslandConfig,
+    ): LiveKind {
         val chronometer = n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
         val blob = "$title $text".lowercase()
         val p = pkg.lowercase()
-        val cfg = IslandConfig.load(applicationContext)
         val callPkg = cfg.callApps.any { p.contains(it.lowercase()) } || CALL_PACKAGES.any { p.contains(it) }
 
         // A live call is not always flagged ongoing: once the call connects, the

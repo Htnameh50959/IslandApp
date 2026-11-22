@@ -12,7 +12,8 @@ Works on Android 9 and newer. Tested on a vivo Y200 (Android 15).
 | Videos | When you leave YouTube, Netflix, MX Player, VLC… a wider pill shows the thumbnail, title and play / pause. Tap the right half to play or pause. |
 | Timer & stopwatch | A compact live pill with the running time. Stays until the timer ends. |
 | Navigation | Live maps / navigation status as a compact pill until you arrive. |
-| Call status | Ongoing or ringing calls stay on the island until they finish. |
+| Call status | Ongoing or ringing calls stay on the island until they finish; calls can be toggled independently. |
+| App notifications | All apps are selected by default. Choose apps whose notifications should appear as island cards; unselected ordinary notifications stay in the system shade. |
 | Copy & Go | Recognises copied links, numbers and emails and suggests **Open / Share**, **Call / Message / New contact**, **Email / New contact**, or **Search / Translate / Share**. Passwords are shown as dots. |
 | Drag & Go | Drag text, a link or a photo to the top of the screen to share or open it (from apps that allow dragging between apps, mostly in split screen). |
 | Smart suggestions | Buttons use the real app icons that will handle the content. |
@@ -89,7 +90,7 @@ Open **Island** and go through the three steps:
 2. **Music, calls & timers**: tap **Enable** and allow notification access for **Island**. This powers the music player and live activities (calls, navigation, timers). Ordinary notifications are not shown in the island.
 3. **Earbuds pop-ups**: tap **Allow** to grant "Nearby devices" (Bluetooth), so it can show your earbuds' name and battery.
 
-Every feature can be switched on or off in the app. **Copy suggestions** starts off: when you enable it, Android will show its clipboard notice each time you copy something.
+Every feature can be switched on or off in the app. The **Notifications** switch is the master control for notification-based cards; calls, navigation, timers and other live activity notifications also have their own switches. **Copy suggestions** starts off: when you enable it, Android will show its clipboard notice each time you copy something.
 
 ## If it isn't working
 

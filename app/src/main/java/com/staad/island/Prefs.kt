@@ -20,6 +20,11 @@ object Prefs {
     const val VIDEO = "video_pill"
     /** Calls, navigation, timers and stopwatches stay as compact live pills. */
     const val LIVE_ACTIVITIES = "live_activities"
+    const val NOTIFICATIONS_ENABLED = "notifications_enabled"
+    const val LIVE_CALLS = "live_calls"
+    const val LIVE_NAVIGATION = "live_navigation"
+    const val LIVE_TIMERS = "live_timers"
+    const val LIVE_OTHER = "live_other"
     /** Hotspot on / connected-devices pill. */
     const val HOTSPOT = "hotspot_devices"
     /** Packages where the island stays completely out of the way. */
@@ -40,6 +45,20 @@ object Prefs {
     /** Opt-in canned replies to chat notifications. */
     const val QUICK_REPLIES = "quick_replies"
     const val CANNED_REPLIES = "canned_replies"
+    /** Per-app notification rules: which apps may appear in the island. */
+    const val NOTIFICATION_RULES = "notification_rules"
+    /** Quiet hours: mute notifications during selected times. */
+    const val QUIET_HOURS = "quiet_hours"
+    /** Quiet hours start hour (0-23). */
+    const val QUIET_HOURS_START = "quiet_hours_start"
+    /** Quiet hours end hour (0-23). */
+    const val QUIET_HOURS_END = "quiet_hours_end"
+    /** Temporary mute: mute for one hour from last interaction. */
+    const val TEMP_MUTE = "temp_mute"
+    /** Keyword filtering: skip notifications containing these terms. */
+    const val KEYWORD_FILTER = "keyword_filter"
+    /** Notification history store size. */
+    const val HISTORY_SIZE = "history_size"
     /** Stored clipboard history; only written when the user opts in. */
     const val CLIP_ITEMS = "clip_items"
     /** Volume/brightness pills. */
@@ -80,6 +99,12 @@ data class IslandConfig(
     val videoPill: Boolean = false,
     /** Keep ongoing calls, navigation and timers on the Island until they finish. */
     val liveActivities: Boolean = true,
+    /** Master switch for all island events sourced from Android notifications. */
+    val notificationsEnabled: Boolean = true,
+    val liveCalls: Boolean = true,
+    val liveNavigation: Boolean = true,
+    val liveTimers: Boolean = true,
+    val liveOther: Boolean = true,
     /** Show personal hotspot on / connected device count. */
     val hotspotDevices: Boolean = true,
     /** Never draw the island over these packages (games, banking, camera…). */
@@ -88,6 +113,21 @@ data class IslandConfig(
     val callApps: Set<String> = emptySet(),
     val navApps: Set<String> = emptySet(),
     val timerApps: Set<String> = emptySet(),
+    /** Per-app notification rules: which apps may appear in the island. */
+    val notificationRules: Set<String> = emptySet(),
+    val notificationRulesConfigured: Boolean = false,
+    /** Quiet hours: mute notifications during selected times. */
+    val quietHours: Boolean = false,
+    /** Quiet hours start hour (0-23). */
+    val quietHoursStart: Int = 22,
+    /** Quiet hours end hour (0-23). */
+    val quietHoursEnd: Int = 7,
+    /** Temporary mute: mute for one hour from last interaction. */
+    val tempMuteUntil: Long = 0L,
+    /** Keyword filtering: skip notifications containing these terms. */
+    val keywordFilter: String = "",
+    /** Notification history store size. */
+    val historySize: Int = 50,
     val cornerPercent: Int = 100,
     val glowPercent: Int = 100,
     val hideImmersive: Boolean = false,
@@ -107,6 +147,7 @@ data class IslandConfig(
         fun load(ctx: Context): IslandConfig {
             val p = Prefs.get(ctx)
             val d = DEFAULT
+            val legacyLiveActivities = p.getBoolean(Prefs.LIVE_ACTIVITIES, d.liveActivities)
             return IslandConfig(
                 enabled = p.getBoolean(Prefs.ENABLED, d.enabled),
                 showIdle = p.getBoolean(Prefs.SHOW_IDLE, d.showIdle),
@@ -122,7 +163,12 @@ data class IslandConfig(
                 dragDrop = p.getBoolean(Prefs.DROP, d.dragDrop),
                 faceId = p.getBoolean(Prefs.FACE_ID, d.faceId),
                 videoPill = p.getBoolean(Prefs.VIDEO, d.videoPill),
-                liveActivities = p.getBoolean(Prefs.LIVE_ACTIVITIES, d.liveActivities),
+                liveActivities = legacyLiveActivities,
+                notificationsEnabled = p.getBoolean(Prefs.NOTIFICATIONS_ENABLED, d.notificationsEnabled),
+                liveCalls = p.getBoolean(Prefs.LIVE_CALLS, legacyLiveActivities),
+                liveNavigation = p.getBoolean(Prefs.LIVE_NAVIGATION, legacyLiveActivities),
+                liveTimers = p.getBoolean(Prefs.LIVE_TIMERS, legacyLiveActivities),
+                liveOther = p.getBoolean(Prefs.LIVE_OTHER, legacyLiveActivities),
                 hotspotDevices = p.getBoolean(Prefs.HOTSPOT, d.hotspotDevices),
                 hiddenApps = p.getStringSet(Prefs.HIDDEN_APPS, d.hiddenApps)?.toSet()
                     ?: d.hiddenApps,
@@ -131,6 +177,15 @@ data class IslandConfig(
                 callApps = p.getStringSet(Prefs.CALL_APPS, d.callApps)?.toSet() ?: d.callApps,
                 navApps = p.getStringSet(Prefs.NAV_APPS, d.navApps)?.toSet() ?: d.navApps,
                 timerApps = p.getStringSet(Prefs.TIMER_APPS, d.timerApps)?.toSet() ?: d.timerApps,
+                notificationRules = p.getStringSet(Prefs.NOTIFICATION_RULES, d.notificationRules)?.toSet()
+                    ?: d.notificationRules,
+                notificationRulesConfigured = p.contains(Prefs.NOTIFICATION_RULES),
+                quietHours = p.getBoolean(Prefs.QUIET_HOURS, d.quietHours),
+                quietHoursStart = p.getInt(Prefs.QUIET_HOURS_START, d.quietHoursStart).coerceIn(0, 23),
+                quietHoursEnd = p.getInt(Prefs.QUIET_HOURS_END, d.quietHoursEnd).coerceIn(0, 23),
+                tempMuteUntil = p.getLong(Prefs.TEMP_MUTE, d.tempMuteUntil),
+                keywordFilter = p.getString(Prefs.KEYWORD_FILTER, d.keywordFilter) ?: "",
+                historySize = p.getInt(Prefs.HISTORY_SIZE, d.historySize).coerceIn(10, 200),
                 cornerPercent = p.getInt(Prefs.CORNER_SCALE, d.cornerPercent).coerceIn(50, 150),
                 glowPercent = p.getInt(Prefs.GLOW_STRENGTH, d.glowPercent).coerceIn(0, 100),
                 hideImmersive = p.getBoolean(Prefs.HIDE_IMMERSIVE, d.hideImmersive),

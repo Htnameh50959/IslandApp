@@ -33,7 +33,7 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         prefs = Prefs.get(this)
         applyWindowInsets()
-        val d = IslandConfig.DEFAULT
+        val d = IslandConfig.load(this)
 
         bindSeek(R.id.seekY, R.id.valY, Prefs.OFFSET_Y, -40, 120, d.offsetYDp)
         bindSeek(R.id.seekX, R.id.valX, Prefs.OFFSET_X, -150, 150, d.offsetXDp)
@@ -50,12 +50,11 @@ class MainActivity : Activity() {
         bindSwitch(R.id.swHotspot, Prefs.HOTSPOT, d.hotspotDevices)
         bindSwitch(R.id.swDrop, Prefs.DROP, d.dragDrop)
         bindSwitch(R.id.swVideo, Prefs.VIDEO, d.videoPill)
-        // Timer, navigation and call status share one live-activities preference.
-        bindLinkedSwitches(
-            intArrayOf(R.id.swLiveActivities, R.id.swNavigation, R.id.swCall),
-            Prefs.LIVE_ACTIVITIES,
-            d.liveActivities,
-        )
+        bindSwitch(R.id.swNotifications, Prefs.NOTIFICATIONS_ENABLED, d.notificationsEnabled)
+        bindSwitch(R.id.swLiveActivities, Prefs.LIVE_TIMERS, d.liveTimers)
+        bindSwitch(R.id.swNavigation, Prefs.LIVE_NAVIGATION, d.liveNavigation)
+        bindSwitch(R.id.swCall, Prefs.LIVE_CALLS, d.liveCalls)
+        bindSwitch(R.id.swOtherLive, Prefs.LIVE_OTHER, d.liveOther)
         // Smart suggestions ride with Copy & Go.
         bindLinkedSwitches(
             intArrayOf(R.id.swCopy, R.id.swSuggestions),
@@ -103,6 +102,9 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.btnVideoApps).setOnClickListener {
             pickApps("Treat as video apps", Prefs.VIDEO_APPS) { updateVideoInfo() }
         }
+        findViewById<View>(R.id.btnNotificationApps).setOnClickListener {
+            pickApps("Show notifications from", Prefs.NOTIFICATION_RULES) { updateNotificationAppsInfo() }
+        }
         findViewById<View?>(R.id.btnCallApps)?.setOnClickListener {
             pickApps("Treat as call apps", Prefs.CALL_APPS) { updateCallInfo() }
         }
@@ -139,8 +141,16 @@ class MainActivity : Activity() {
             .distinctBy { it.packageName }
             .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
         val labels = apps.map { pm.getApplicationLabel(it).toString() }.toTypedArray()
-        val chosen = prefs.getStringSet(key, emptySet())!!.toMutableSet()
-        val checked = BooleanArray(apps.size) { apps[it].packageName in chosen }
+        val selectionConfigured = prefs.contains(key)
+        val chosen = if (key == Prefs.NOTIFICATION_RULES && !selectionConfigured) {
+            apps.mapTo(mutableSetOf()) { it.packageName }
+        } else {
+            prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet()
+        }
+        val checked = BooleanArray(apps.size) {
+            (key == Prefs.NOTIFICATION_RULES && !selectionConfigured) ||
+                apps[it].packageName in chosen
+        }
 
         AlertDialog.Builder(this)
             .setTitle(title)
@@ -262,6 +272,19 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateNotificationAppsInfo() {
+        if (!prefs.contains(Prefs.NOTIFICATION_RULES)) {
+            findViewById<TextView>(R.id.notificationAppsInfo).text = "All apps selected"
+            return
+        }
+        val n = prefs.getStringSet(Prefs.NOTIFICATION_RULES, emptySet())?.size ?: 0
+        findViewById<TextView>(R.id.notificationAppsInfo).text = if (n == 0) {
+            "No apps selected"
+        } else {
+            "$n app${if (n == 1) "" else "s"} selected"
+        }
+    }
+
     private fun updateHiddenInfo() {
         val n = prefs.getStringSet(Prefs.HIDDEN_APPS, emptySet())?.size ?: 0
         findViewById<TextView>(R.id.hiddenInfo).text = if (n == 0) {
@@ -363,6 +386,7 @@ class MainActivity : Activity() {
         super.onResume()
         updateHiddenInfo()
         updateVideoInfo()
+        updateNotificationAppsInfo()
         updateCallInfo()
         updateNavInfo()
         updateTimerInfo()

@@ -21,6 +21,7 @@ class PreviewActivity : Activity() {
         "status" to "Earbuds / status",
         "charging" to "Charging",
         "live" to "Timer (live activity)",
+        "notification" to "Notification card",
         "actions" to "Copy & Go actions",
         "drop" to "Drop target",
         "face" to "Unlock animation",

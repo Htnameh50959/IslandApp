@@ -37,7 +37,7 @@
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_red" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Music, calls &amp; timers" />
+                    <TextView style="@style/RowTitle" android:text="Notification access" />
                     <TextView android:id="@+id/statusNotif" style="@style/RowSub" />
                 </LinearLayout>
                 <Button android:id="@+id/btnNotif" style="@style/RowButton" android:text="Turn on" />
@@ -87,7 +87,27 @@
                 <Switch android:id="@+id/swEnabled" style="@style/RowSwitch" android:contentDescription="Show the island" />
             </LinearLayout>
         </LinearLayout>
-        <TextView style="@style/Section" android:text="Live activities" />
+        <TextView style="@style/Section" android:text="Notification cards" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Notifications" />
+                    <TextView style="@style/RowSub" android:text="Allow notification-based cards on the island" />
+                </LinearLayout>
+                <Switch android:id="@+id/swNotifications" style="@style/RowSwitch" android:contentDescription="Notifications" />
+            </LinearLayout>
+            <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnNotificationApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_teal" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Apps" />
+                    <TextView android:id="@+id/notificationAppsInfo" style="@style/RowSub" android:text="Choose apps whose notifications appear" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Media" />
         <LinearLayout style="@style/Card">
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_music" android:backgroundTint="@color/t_pink" android:importantForAccessibility="no" />
@@ -115,23 +135,15 @@
                 </LinearLayout>
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
-            <View style="@style/Divider" />
-            <LinearLayout android:id="@+id/btnCallApps" style="@style/Row.Tappable">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_phone" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Notification categories" />
+        <LinearLayout style="@style/Card">
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Call apps" />
-                    <TextView android:id="@+id/callAppsInfo" style="@style/RowSub" android:text="Using built-in call apps" />
+                    <TextView style="@style/RowTitle" android:text="Timer &amp; stopwatch" />
                 </LinearLayout>
-                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
-            </LinearLayout>
-            <View style="@style/Divider" />
-            <LinearLayout android:id="@+id/btnNavApps" style="@style/Row.Tappable">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_nav" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
-                <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Navigation apps" />
-                    <TextView android:id="@+id/navAppsInfo" style="@style/RowSub" android:text="Using built-in navigation apps" />
-                </LinearLayout>
-                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+                <Switch android:id="@+id/swLiveActivities" style="@style/RowSwitch" android:contentDescription="Timer &amp; stopwatch" />
             </LinearLayout>
             <View style="@style/Divider" />
             <LinearLayout android:id="@+id/btnTimerApps" style="@style/Row.Tappable">
@@ -142,15 +154,7 @@
                 </LinearLayout>
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
-            <View style="@style/Divider" />
-            <LinearLayout style="@style/Row">
-                <ImageView style="@style/RowIcon" android:src="@drawable/ic_timer" android:backgroundTint="@color/t_orange" android:importantForAccessibility="no" />
-                <LinearLayout style="@style/RowText">
-                    <TextView style="@style/RowTitle" android:text="Timer &amp; stopwatch" />
-                </LinearLayout>
-                <Switch android:id="@+id/swLiveActivities" style="@style/RowSwitch" android:contentDescription="Timer &amp; stopwatch" />
-            </LinearLayout>
-            <View style="@style/Divider" />
+            <View style="@style/Divider.Full" />
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_nav" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
@@ -159,6 +163,15 @@
                 <Switch android:id="@+id/swNavigation" style="@style/RowSwitch" android:contentDescription="Navigation" />
             </LinearLayout>
             <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnNavApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_nav" android:backgroundTint="@color/t_blue" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Navigation apps" />
+                    <TextView android:id="@+id/navAppsInfo" style="@style/RowSub" android:text="Using built-in navigation apps" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider.Full" />
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_phone" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
@@ -167,6 +180,26 @@
                 <Switch android:id="@+id/swCall" style="@style/RowSwitch" android:contentDescription="Calls" />
             </LinearLayout>
             <View style="@style/Divider" />
+            <LinearLayout android:id="@+id/btnCallApps" style="@style/Row.Tappable">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_phone" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Call apps" />
+                    <TextView android:id="@+id/callAppsInfo" style="@style/RowSub" android:text="Using built-in call apps" />
+                </LinearLayout>
+                <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
+            </LinearLayout>
+            <View style="@style/Divider.Full" />
+            <LinearLayout style="@style/Row">
+                <ImageView style="@style/RowIcon" android:src="@drawable/ic_bell" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Other live activity" />
+                    <TextView style="@style/RowSub" android:text="Fitness, recording, delivery and chat" />
+                </LinearLayout>
+                <Switch android:id="@+id/swOtherLive" style="@style/RowSwitch" android:contentDescription="Other live activity" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Device events" />
+        <LinearLayout style="@style/Card">
             <LinearLayout style="@style/Row">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_hotspot" android:backgroundTint="@color/t_green" android:importantForAccessibility="no" />
                 <LinearLayout style="@style/RowText">
@@ -193,6 +226,7 @@
                 <Switch android:id="@+id/swStatus" style="@style/RowSwitch" android:contentDescription="Earbuds &amp; sound modes" />
             </LinearLayout>
         </LinearLayout>
+        <TextView style="@style/Footer" android:text="Turn notification cards on or off above, then choose which categories and apps can appear." />
         <TextView style="@style/Section" android:text="Copy &amp; share" />
         <LinearLayout style="@style/Card">
             <LinearLayout style="@style/Row">
@@ -377,20 +411,24 @@
                     android:textColor="@color/text" android:text="Preview every pill" />
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
-            <View style="@style/Divider" />
+        </LinearLayout>
+        <TextView style="@style/Section" android:text="Backup &amp; restore" />
+        <LinearLayout style="@style/Card">
             <LinearLayout android:id="@+id/btnExport" style="@style/Row.Tappable">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_share" android:backgroundTint="@color/t_teal" android:importantForAccessibility="no" />
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
-                    android:textColor="@color/text" android:text="Export settings" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Export settings" />
+                    <TextView style="@style/RowSub" android:text="Save settings to a JSON file" />
+                </LinearLayout>
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
             <View style="@style/Divider" />
             <LinearLayout android:id="@+id/btnImport" style="@style/Row.Tappable">
                 <ImageView style="@style/RowIcon" android:src="@drawable/ic_drop" android:backgroundTint="@color/t_purple" android:importantForAccessibility="no" />
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:paddingTop="15dp" android:paddingBottom="15dp" android:textSize="16sp"
-                    android:textColor="@color/text" android:text="Import settings" />
+                <LinearLayout style="@style/RowText">
+                    <TextView style="@style/RowTitle" android:text="Import settings" />
+                    <TextView style="@style/RowSub" android:text="Restore from an Island JSON file" />
+                </LinearLayout>
                 <ImageView style="@style/Chevron" android:importantForAccessibility="no" />
             </LinearLayout>
         </LinearLayout>

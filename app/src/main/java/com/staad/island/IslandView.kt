@@ -524,6 +524,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         addView(faceGlyph, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
     }
     private var faceAnim: ValueAnimator? = null
+    private var faceUnlocked = false
+    private var faceUnlockedIcon = 0
 
     // ── Status layer (icon + name ◀ camera ▶ value · indicators) ────────────
     private val statusStrip = newStrip()
@@ -543,7 +545,8 @@ class IslandView(context: Context) : FrameLayout(context) {
     }
 
     // ── Notification layer (Origin Island card) ─────────────────────────────
-    //  [photo + app badge]  Title                         App
+    //  [photo + app badge]  App
+    //                       Title
     //                       Message text (2 lines, more when opened)
     //                       [ Action ] [ Action ] [ Open ]      ← opened only
     // Top padding clears the camera hole so the content sits below it.
@@ -559,8 +562,15 @@ class IslandView(context: Context) : FrameLayout(context) {
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
         oval()
     }
-    private val notifTitle = label(15f, Color.WHITE, bold = true)
-    private val notifApp = label(12f, grey).apply { gravity = Gravity.END }
+    private val notifTitle = label(15f, Color.WHITE, bold = true).apply {
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+    }
+    private val notifApp = label(11f, grey, bold = true).apply {
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        letterSpacing = 0.04f
+    }
     private val notifText = label(13.5f, 0xFFC7C7CC.toInt(), lines = 2).apply {
         setLineSpacing(dp(1.5f).toFloat(), 1f)
     }
@@ -582,13 +592,13 @@ class IslandView(context: Context) : FrameLayout(context) {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), 0, 0, 0)
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(notifTitle, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-                    addView(notifApp, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(8) })
+                addView(notifApp, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+                addView(notifTitle, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                    topMargin = dp(2)
                 })
-                addView(notifText, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(3) })
+                addView(notifText, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                    topMargin = dp(4)
+                })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         addView(notifActions, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
@@ -957,6 +967,8 @@ class IslandView(context: Context) : FrameLayout(context) {
     /** iOS-style Face ID: glyph breathes under the camera while scanning, then pops green. */
     fun showFaceId(unlocked: Boolean, unlockedIcon: Int = R.drawable.ic_face_ok) {
         val wasFace = mode == Mode.STATUS && currentLayer === faceLayer
+        val alreadyScanning = wasFace && !faceUnlocked
+        val alreadyUnlocked = wasFace && faceUnlocked && faceUnlockedIcon == unlockedIcon
         mode = Mode.STATUS
         compactBars.playing = false
         mediaBars.playing = false
@@ -965,35 +977,46 @@ class IslandView(context: Context) : FrameLayout(context) {
         val h = compactH() + dp(46) + max(0, clear - dp(8))
         sizeLayer(faceLayer, w, h)
         setShown(true)
-        faceAnim?.cancel()
         if (!unlocked) {
-            faceGlyph.setImageResource(R.drawable.ic_face_scan)
-            faceGlyph.imageTintList = ColorStateList.valueOf(Color.WHITE)
-            setGlow(Color.WHITE)
-            faceAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 900
-                repeatCount = ValueAnimator.INFINITE
-                repeatMode = ValueAnimator.REVERSE
-                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-                addUpdateListener {
-                    if (currentLayer !== faceLayer) { cancel(); return@addUpdateListener }
-                    val f = it.animatedValue as Float
-                    faceGlyph.alpha = 0.55f + 0.45f * f
-                    faceGlyph.scaleX = 0.92f + 0.12f * f
-                    faceGlyph.scaleY = 0.92f + 0.12f * f
+            if (!alreadyScanning) {
+                faceAnim?.cancel()
+                faceGlyph.animate().cancel()
+                faceUnlocked = false
+                faceUnlockedIcon = 0
+                faceGlyph.setImageResource(R.drawable.ic_face_scan)
+                faceGlyph.imageTintList = ColorStateList.valueOf(Color.WHITE)
+                setGlow(Color.WHITE)
+                faceAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 900
+                    repeatCount = ValueAnimator.INFINITE
+                    repeatMode = ValueAnimator.REVERSE
+                    interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                    addUpdateListener {
+                        if (currentLayer !== faceLayer) { cancel(); return@addUpdateListener }
+                        val f = it.animatedValue as Float
+                        faceGlyph.alpha = 0.55f + 0.45f * f
+                        faceGlyph.scaleX = 0.92f + 0.12f * f
+                        faceGlyph.scaleY = 0.92f + 0.12f * f
+                    }
+                    start()
                 }
-                start()
             }
         } else {
-            // Shows what unlocked the phone: face, fingerprint or PIN.
-            faceGlyph.setImageResource(unlockedIcon)
-            faceGlyph.imageTintList = ColorStateList.valueOf(green)
-            faceGlyph.alpha = 1f
-            faceGlyph.scaleX = 0.6f; faceGlyph.scaleY = 0.6f
-            faceGlyph.animate().scaleX(1f).scaleY(1f).setDuration(380)
-                .setInterpolator(android.view.animation.OvershootInterpolator(2.6f)).start()
+            if (!alreadyUnlocked) {
+                faceAnim?.cancel()
+                faceGlyph.animate().cancel()
+                faceUnlocked = true
+                faceUnlockedIcon = unlockedIcon
+                // Shows what unlocked the phone: face, fingerprint or PIN.
+                faceGlyph.setImageResource(unlockedIcon)
+                faceGlyph.imageTintList = ColorStateList.valueOf(green)
+                faceGlyph.alpha = 1f
+                faceGlyph.scaleX = 0.6f; faceGlyph.scaleY = 0.6f
+                faceGlyph.animate().scaleX(1f).scaleY(1f).setDuration(380)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(2.6f)).start()
+                performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+            }
             setGlow(green)
-            performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         }
         if (wasFace) {
             rect.height() // already sized; just keep the morph target
@@ -1318,7 +1341,6 @@ class IslandView(context: Context) : FrameLayout(context) {
         notifTitle.text = n.title
         notifApp.text = n.appName.takeIf { it.isNotBlank() && it != n.title }.orEmpty()
         notifApp.visibility = if (notifApp.text.isNullOrEmpty()) GONE else VISIBLE
-        notifApp.maxWidth = dp(110)
         notifText.text = n.text
         notifText.maxLines = if (expanded) 8 else 2
         notifText.visibility = if (n.text.isEmpty()) GONE else VISIBLE
@@ -1730,7 +1752,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         includeFontPadding = false
-        typeface = IslandFonts.medium
+        setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(10), 0, dp(10), 0)
         val shape = GradientDrawable().apply {
             cornerRadius = dp(19).toFloat()
@@ -1755,7 +1777,7 @@ class IslandView(context: Context) : FrameLayout(context) {
             maxLines = lines
             ellipsize = TextUtils.TruncateAt.END
             includeFontPadding = false
-            typeface = if (bold) IslandFonts.medium else IslandFonts.regular
+            if (bold) setTypeface(typeface, Typeface.BOLD)
         }
 
     private fun iconButton(res: Int, sizeDp: Int, onClick: () -> Unit) = ImageView(context).apply {
@@ -1788,17 +1810,6 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
         clipToOutline = true
     }
-}
-
-/**
- * The island uses the phone's own font, so it changes with the font picked in
- * the phone's theme settings. Typeface.DEFAULT is what theme fonts replace;
- * named families like "sans-serif-medium" often aren't, which made the
- * island's titles look different from the rest of the phone.
- */
-private object IslandFonts {
-    val regular: Typeface get() = Typeface.DEFAULT
-    val medium: Typeface get() = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
 }
 
 /**
